@@ -1,8 +1,3 @@
-"""Update the /Workspace/Shared/finhive-2026 Repos checkout to the merged main commit.
-
-Run last, after job definitions are upserted, so every notebook_path a job now
-references already resolves by the time this finishes (ARCHITECTURE_V2.md #6.2, #8.2).
-"""
 from __future__ import annotations
 
 from databricks.sdk import WorkspaceClient

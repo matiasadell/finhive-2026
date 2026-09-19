@@ -26,10 +26,6 @@ jobs:
 
       - run: pip install -r .github/scripts/requirements.txt
 
-      # Promotion is a strict, three-step sequence (ARCHITECTURE_V2.md #6.2): rewrite the
-      # notebook_path prefixes first, upsert the job definitions second, and only then pull
-      # the shared Repos checkout to the new commit - so no promoted job ever points at
-      # notebooks that haven't landed in /Workspace/Shared/finhive-2026/ yet.
       - name: Promote job specs to the shared checkout path
         run: python .github/scripts/promote_job_specs.py
 

@@ -1,5 +1,3 @@
-# deploy/darabricks/jobs/ingest_fred.yaml
-# Same shape as ingest_yahoo.yaml; see that file for the promotion note.
 name: finhive_ingest_fred
 tasks:
   - task_key: ingest_fred

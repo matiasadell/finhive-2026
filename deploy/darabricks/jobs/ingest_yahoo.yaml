@@ -1,7 +1,3 @@
-# deploy/darabricks/jobs/ingest_yahoo.yaml
-# notebook_path is written against a personal Repos checkout while iterating on a feature
-# branch; promote_job_specs.py rewrites the /Workspace/Users/*/finhive-2026/ prefix to
-# /Workspace/Shared/finhive-2026/ on merge to main (ARCHITECTURE_V2.md #6.2).
 name: finhive_ingest_yahoo
 tasks:
   - task_key: ingest_yahoo
@@ -17,8 +13,6 @@ environments:
       client: "3"
       dependencies:
         - yfinance
-# The market closes at 16:00 America/New_York; timezone_id (not a UTC offset) is what
-# keeps this correct across the DST transition.
 schedule:
   quartz_cron_expression: "0 30 16 ? * MON-FRI"
   timezone_id: America/New_York

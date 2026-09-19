@@ -1,9 +1,3 @@
-"""Structural validation of every deploy/darabricks/jobs/*.yaml spec.
-
-Run on every pull request (ci.yml) - the check that replaces `databricks bundle validate`
-for job definitions deployed directly through the SDK instead of an Asset Bundle
-(ARCHITECTURE_V2.md #8.1).
-"""
 from __future__ import annotations
 
 import sys

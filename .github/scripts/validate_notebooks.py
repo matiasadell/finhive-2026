@@ -1,6 +1,3 @@
-"""Fail fast on a corrupted .ipynb - the notebook JSON structure is what Databricks
-Repos actually parses, so a malformed file is a deploy-time failure without this check.
-"""
 from __future__ import annotations
 
 import json

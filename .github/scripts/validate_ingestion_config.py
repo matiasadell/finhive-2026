@@ -1,6 +1,3 @@
-"""Validate config/data_ingestion/*.json against the shape the ingestion orchestrator
-notebooks expect: a JSON array of {"series": str, "start_date": str | null}.
-"""
 from __future__ import annotations
 
 import json

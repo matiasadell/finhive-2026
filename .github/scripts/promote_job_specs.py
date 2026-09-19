@@ -1,8 +1,3 @@
-"""Rewrite every job spec's notebook_path from a personal Repos checkout to the shared
-one. Run first, before anything is deployed (ARCHITECTURE_V2.md #6.2, #8.2) - the
-Databricks API must only ever see job definitions that already point at
-/Workspace/Shared/finhive-2026/.
-"""
 from __future__ import annotations
 
 import re

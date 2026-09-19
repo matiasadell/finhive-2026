@@ -1,11 +1,3 @@
-"""Upsert every job definition under deploy/darabricks/jobs/ via the Databricks SDK,
-idempotent by job name. Run second, after promote_job_specs.py, before
-sync_shared_repo.py (ARCHITECTURE_V2.md #6.2, #8.2).
-
-Auth: WorkspaceClient picks up DATABRICKS_HOST / DATABRICKS_CLIENT_ID /
-DATABRICKS_CLIENT_SECRET from the environment - a service-principal OAuth M2M
-credential, never a personal access token (ARCHITECTURE_V2.md #5.3).
-"""
 from __future__ import annotations
 
 import os
@@ -19,7 +11,6 @@ JOBS_DIR = Path("deploy/darabricks/jobs")
 
 
 def render(spec: dict, alert_email: str) -> dict:
-    """Resolve the small set of `{placeholder}` strings the checked-in specs use."""
     text = yaml.safe_dump(spec, sort_keys=False)
     text = text.replace("{alert_email}", alert_email)
     return yaml.safe_load(text)
