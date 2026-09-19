@@ -1,0 +1,27 @@
+# deploy/darabricks/jobs/ingest_fred.yaml
+# Same shape as ingest_yahoo.yaml; see that file for the promotion note.
+name: finhive_ingest_fred
+tasks:
+  - task_key: ingest_fred
+    notebook_task:
+      notebook_path: /Workspace/Users/facumazzola@gmail.com/finhive-2026/notebooks/data_ingestion/fred/orchestrator
+      base_parameters:
+        job_name: finhive_ingest_fred
+        worker_notebook_path: /Workspace/Users/facumazzola@gmail.com/finhive-2026/notebooks/data_ingestion/fred/worker
+    environment_key: ingestion
+environments:
+  - environment_key: ingestion
+    spec:
+      client: "3"
+      dependencies:
+        - fredapi
+schedule:
+  quartz_cron_expression: "0 30 16 ? * MON-FRI"
+  timezone_id: America/New_York
+  pause_status: UNPAUSED
+queue:
+  enabled: true
+email_notifications:
+  on_failure:
+    - "{alert_email}"
+max_retries: 1

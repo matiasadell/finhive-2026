@@ -1,0 +1,40 @@
+name: CD Databricks
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cd-databricks-free
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: free
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r .github/scripts/requirements.txt
+
+      # Promotion is a strict, three-step sequence (ARCHITECTURE_V2.md #6.2): rewrite the
+      # notebook_path prefixes first, upsert the job definitions second, and only then pull
+      # the shared Repos checkout to the new commit - so no promoted job ever points at
+      # notebooks that haven't landed in /Workspace/Shared/finhive-2026/ yet.
+      - name: Promote job specs to the shared checkout path
+        run: python .github/scripts/promote_job_specs.py
+
+      - name: Deploy job definitions
+        run: python .github/scripts/deploy_databricks_jobs.py
+
+      - name: Sync the shared Repos checkout to main
+        run: python .github/scripts/sync_shared_repo.py

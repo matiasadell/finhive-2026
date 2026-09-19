@@ -1,0 +1,8 @@
+[
+    {"series": "^GSPC", "start_date": null},
+    {"series": "^DJI", "start_date": null},
+    {"series": "^IXIC", "start_date": null},
+    {"series": "AAPL", "start_date": null},
+    {"series": "MSFT", "start_date": null},
+    {"series": "GOOG", "start_date": "1997-03-23"}
+]
