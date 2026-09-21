@@ -262,19 +262,18 @@ notebooks/
 │   ├── deploy_agent.py            stage: update the endpoint, smoke it, promote the `champion` alias
 │   └── rollback_agent.py          stage: restore the `champion` version — runs only after a failure
 │
-└── serving/                       what makes the graph callable — functions, run by the pipeline stages (§17)
-    ├── model_entry.py             the ResponsesAgent that MLflow logs, and its check
-    ├── log_model.py               log the model to MLflow → model uri
-    ├── register_model.py          register it in Unity Catalog → model version
-    ├── deploy_endpoint.py         upsert the endpoint at a version, wait until ready, move the `champion` alias
-    ├── smoke_endpoint.py          two questions against the served endpoint
-    └── rollback_endpoint.py       repoint the endpoint at the `champion` version
+└── serving/                       what makes the graph callable (§17)
+    ├── model_entry.py             the ResponsesAgent that MLflow logs, and its check — the only file that
+    │                              runs inside the serving container
+    └── endpoint.py                helpers the deploy and rollback stages share: set the served version,
+                                   read and move the `champion` alias
 ```
 
 **Every notebook defines; the notebooks of `pipeline/` act.** Each notebook of the tree also defines a
 `check` — its own smoke test — and a stage notebook runs the checks of the notebooks it is responsible
-for (§19). Three notebooks have no `check` because other checks exercise them: `graph/state.py` (types),
-`tools/safe_tool.py` (a wrapper) and `agents/base.py` (the contract and the builder). The only other
+for (§19). Four notebooks have no `check` because other checks exercise them: `graph/state.py` (types),
+`tools/safe_tool.py` (a wrapper), `agents/base.py` (the contract and the builder) and
+`serving/endpoint.py` (exercised by the deploy stage). The only other
 notebook that acts is `evaluation/build_golden_set.py`.
 
 **Direction of dependencies** — each folder may use the ones to its left, never to its right:
@@ -327,7 +326,7 @@ anything.
    `import`, and inside the serving container.
 4. **Notebooks import each other with plain Python imports; `%run` is not used.** A notebook is a
    plain `.py` file whose cell markers are comments, so every file stays importable, and a stage
-   notebook imports what it runs. `serving/log_model` logs the model with the whole tree as code:
+   notebook imports what it runs. `pipeline/package_agent` logs the model with the whole tree as code:
    ```python
    mlflow.pyfunc.log_model(
        name="finhive_agent",
@@ -1322,12 +1321,12 @@ eye in the run table.
 
 ---
 
-## 17. Serving — `model_entry` and the deployment functions
+## 17. Serving — `model_entry`, `endpoint` and the release stages
 
 `architecture.md` §11: the graph runs only on Databricks, behind one Model Serving endpoint, and
-`apps/api` is a thin HTTP client of it. Six files in `serving/` make that real: one defines what is
-served and five deploy it. They are **functions**; the stage notebooks of `pipeline/` call them in
-order (§19).
+`apps/api` is a thin HTTP client of it. Two files in `serving/` and three stage notebooks make that
+real: `model_entry` defines what is served, `endpoint` holds what the deploy and rollback stages share,
+and `package_agent`, `deploy_agent` and `rollback_agent` (§19) do the deploying.
 
 **`notebooks/serving/model_entry.py`** — what MLflow logs (models-from-code):
 
@@ -1361,16 +1360,21 @@ Requirements the graph already satisfies and must keep satisfying:
   that is what makes `apps/api`'s auditable response shape possible, and it is a better demo
   than a chat box.
 
-**The five deployment functions.** A stage notebook calls them; values pass between stages in
-`dbutils.jobs.taskValues`, and the last known good version lives in Unity Catalog, not in a task.
+**Where the deployment logic lives.** Only `model_entry` has to be a separate file, because it is the one
+that runs inside the serving container. Everything else runs only in a Databricks job, has a single caller,
+and is a few lines, so it sits **inside the stage notebook that runs it** rather than in a file of its own.
+The one exception is `serving/endpoint.py`, because `deploy_agent` and `rollback_agent` must do the same
+thing to the endpoint — the second toward the previous version.
 
-| Function (file) | Does | Takes | Returns |
+| Where | What | Takes | Returns |
 |---|---|---|---|
-| `log_model` | `log_model(python_model="notebooks/serving/model_entry.py", code_paths=["notebooks"], pip_requirements=…)` | — | `model_uri` |
-| `register_model` | registers the logged model in Unity Catalog under the name in `setup/config.py` | `model_uri` | `model_version` |
-| `upsert_endpoint`, `mark_champion` (`deploy_endpoint`) | creates or updates the endpoint through the SDK (name, workload size, scale-to-zero as plain arguments, no separate YAML) and waits until it is ready; `mark_champion` moves the `champion` alias to a version | `model_version` | `endpoint_name` |
-| `smoke` (`smoke_endpoint`) | asks the **served** endpoint one ordinary question and one advice request, which must be refused | `endpoint_name` | pass or fail |
-| `restore_champion` (`rollback_endpoint`) | repoints the endpoint at the version the `champion` alias holds; a **no-op** when there is no alias or the endpoint is already on it | `endpoint_name` | — |
+| `pipeline/package_agent` | logs the model — `log_model(python_model="notebooks/serving/model_entry.py", code_paths=["notebooks"], pip_requirements=…)` — then registers it in Unity Catalog under the name in `setup/config.py` | — | `model_uri`, `model_version` |
+| `serving/endpoint.py` | `champion_version()` and `mark_champion(version)` read and move the `champion` alias; `set_served_version(endpoint, version)` creates or updates the endpoint through the SDK (name, workload size, scale-to-zero as plain arguments, no separate YAML) and waits until it is ready | a version | `endpoint_name` |
+| `pipeline/deploy_agent` | reads the alias, `set_served_version(new)`, asks the **served** endpoint one ordinary question and one advice request (which must be refused), and only then `mark_champion(new)` | `model_version` | — |
+| `pipeline/rollback_agent` | `set_served_version(champion_version())`; a **no-op** when there is no alias or the endpoint is already on it | — | — |
+
+Values pass between stages in `dbutils.jobs.taskValues`; the last known good version lives in Unity
+Catalog, not in a task.
 
 **The `champion` alias is the durable record of the last known good version.** `deploy_agent` reads it
 *before* updating the endpoint, updates the endpoint, smokes it, and moves the alias to the new version
@@ -1379,9 +1383,9 @@ dies — the alias still names the version that worked, and `rollback_agent` res
 on a value held by a failed task. On the very first deploy there is no alias, so a failure has nothing to
 restore to and stays visible.
 
-`smoke` is a step after `upsert_endpoint` because an endpoint that loads a model is not one that answers:
+The smoke is a step after `set_served_version` because an endpoint that loads a model is not one that answers:
 `load_context` failures (a missing `code_path`, a `PanelData` read without the right grant) only appear
-when the new version is live. **The pins of `log_model` and those of the job environment must match**
+when the new version is live. **The pins of `package_agent`'s `log_model` and those of the job environment must match**
 (§19.6): the serving container is another machine and the job environment does not follow the model into
 it.
 
@@ -1389,7 +1393,7 @@ it.
 
 ## 18. The agent notebooks to create
 
-Every notebook defines its functions and, except three, a `check` (§3.3). The stage notebooks of
+Every notebook defines its functions and, except four, a `check` (§3.3). The stage notebooks of
 `pipeline/` run the checks; the last column says what each `check` does. All at zero model calls unless
 stated; the details are §19.4.
 
@@ -1416,7 +1420,7 @@ stated; the details are §19.4.
 | `graph/cache_node.py` | `cache_lookup`, `cache_store` | a miss continues, a hit ends, an outage is a miss |
 | `graph/build.py` | assembly and compile | three end-to-end questions (about 15–30 calls) |
 | `serving/model_entry.py` | the `ResponsesAgent` MLflow logs | instantiate, `load_context`, one `predict` (~10 calls) |
-| `serving/{log_model,register_model,deploy_endpoint,smoke_endpoint,rollback_endpoint}.py` | the five deployment functions (§17) | *none: they are the stages' actions* |
+| `serving/endpoint.py` | `set_served_version`, `champion_version`, `mark_champion` (§17) | *no check: exercised by the deploy stage* |
 | **`pipeline/runner.py`** | `run_stage`: run checks in dependency order, skip what a failure blocks, print the table | *no check* |
 | **`pipeline/{verify_foundations,verify_components,assemble_agent,package_agent,deploy_agent,rollback_agent}.py`** | — (they act) | the six stages of §19.4 |
 | **`evaluation/build_golden_set.py`** | the curated cases (§16.1) | acts too: registers the MLflow evaluation dataset |
@@ -1519,9 +1523,9 @@ one proved.
 | | `graph/cache_node` | semantic_cache | a miss continues; a hit ends the run; an outage is a miss; **skipped when `enable_cache=false`** | 0–1 |
 | **assemble_agent** | `graph/build` | every check of verify_components | compiles; an ordinary question, an advice request (refused) and a crypto question run end to end; the blocked flag, cards, consensus, disclaimer and `messages[-1]` are right | ~15–30 |
 | | `serving/model_entry` | build | instantiates `FinHiveAgent`, `load_context`, one `predict`; the response serializes to JSON | ~10 |
-| **package_agent** | `serving/log_model`, then `serving/register_model` | — | logs the model, registers a version in Unity Catalog | 0 |
-| **deploy_agent** | `serving/deploy_endpoint`, then `serving/smoke_endpoint` | — | reads the `champion` alias, updates the endpoint and waits until ready; the served endpoint answers an ordinary question and refuses an advice request; **only then** moves `champion` to the new version | ~10 |
-| **rollback_agent** | `serving/rollback_endpoint` | — | repoints the endpoint at the `champion` version; a no-op when there is none | 0 |
+| **package_agent** | *(acts itself)* | — | logs the model, registers a version in Unity Catalog | 0 |
+| **deploy_agent** | `serving/endpoint` | — | reads the `champion` alias, updates the endpoint and waits until ready; the served endpoint answers an ordinary question and refuses an advice request; **only then** moves `champion` to the new version | ~10 |
+| **rollback_agent** | `serving/endpoint` | — | repoints the endpoint at the `champion` version; a no-op when there is none | 0 |
 
 The dependencies inside the two verifying stages, and the order the runner follows:
 
@@ -1708,7 +1712,7 @@ environments:
 | **`publish=false` is a first-class mode** | "does every notebook work and does the graph answer" and "ship it" are different questions |
 | **`max_concurrent_runs: 1`** | two runs would race the same endpoint update |
 | **Exact pins, third-party only** | an unpinned `>=` produced `ResolutionTooDeep` before any code ran; notebook code is imported, never installed |
-| **The pins of `serving/log_model`'s `pip_requirements` equal the environment above** | the serving container is another machine; the job environment does not follow the model into it |
+| **The pins in `package_agent`'s `pip_requirements` equal the environment above** | the serving container is another machine; the job environment does not follow the model into it |
 
 ### 19.7 A run from the outside, and when it fails
 
