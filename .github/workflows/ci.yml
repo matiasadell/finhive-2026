@@ -3,6 +3,11 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # The agent is built as commits on `matias`, with a single pull request to `main` once the
+  # deploy pipeline works end to end (docs/plan/agent-build-plan.md). Without this trigger no
+  # check would run between now and then.
+  push:
+    branches: [matias]
 
 jobs:
   validate:

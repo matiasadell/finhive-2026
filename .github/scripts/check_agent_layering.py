@@ -241,7 +241,7 @@ def main() -> int:
     )
 
     if not modules:
-        print("no agent modules yet -- the tree is built from PR 1 onward")
+        print("no agent modules yet -- the tree is built from step 1 onward")
         return 0
 
     problems: list[str] = []
