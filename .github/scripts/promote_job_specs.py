@@ -15,11 +15,13 @@ def promote(spec: dict) -> dict:
         notebook_task = task.get("notebook_task", {})
         for key in ("notebook_path",):
             if key in notebook_task:
-                notebook_task[key] = USER_PREFIX.sub(SHARED_PREFIX, notebook_task[key])
+                path = notebook_task[key]
+                notebook_task[key] = "/Workspace/shared/finhive-2026" + path.split("finhive-2026", 1)[1]
         base_parameters = notebook_task.get("base_parameters", {})
         for key, value in base_parameters.items():
             if isinstance(value, str):
-                base_parameters[key] = USER_PREFIX.sub(SHARED_PREFIX, value)
+                path = value
+                base_parameters[key] = "/Workspace/shared/finhive-2026" + path.split("finhive-2026", 1)[1]
     return spec
 
 
