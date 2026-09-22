@@ -25,7 +25,7 @@ worse than none.
 | 0 | Foundations: ADR, data contract, layering check | CI green; contract acknowledged | **Done** — `1bccf1f`, `20e103a` |
 | 1 | `setup/config.py` + `llm/` + the runner | A1 | **Code complete — gate A1 pending a workspace run** |
 | 2 | `tools/` | A2 | **Code complete — 19 tools green on the fixture; gate A2 pending gold** |
-| 3 | `guardrails/` + `graph/opinion.py` | A3 | Not started |
+| 3 | `guardrails/` + `graph/opinion.py` | A3 | **Code complete — verified on a stub model; gate A3 pending MLflow** |
 | 4 | `agents/` + planner + synthesizer | A4 (part 1) | Not started |
 | 5 | `graph/build.py` + assemble stage | A4 (part 2) | Not started — **first that needs real gold tables** |
 | 6 | `serving/` + release stages + job spec | A7 | Not started — **the PR to `main` opens here** |
@@ -194,7 +194,7 @@ error normally.
 - Two files the tree in section 3 does not list: `formatting.py`, because duplicating the as-of
   contract across four families is how it drifts, and `checks.py`, for the same reason.
 
-### Step 3 — `guardrails/` + `graph/opinion.py` · gate A3
+### Step 3 — `guardrails/` + `graph/opinion.py` · gate A3 · **code complete**
 
 - `notebooks/guardrails/input_guardrail.py` — `InputVerdict`, **fails open**. The line is
   personalization, not topic.
@@ -204,7 +204,11 @@ error normally.
   it the parallel experts overwrite each other.
 - `notebooks/graph/opinion.py` — card shape, evidence rebuilt from tool messages, coercion rules,
   consensus arithmetic (`0.5` directional, `0.35` dispersion)
-- `notebooks/evaluation/build_golden_set.py` — the 11+ guardrail cases
+- `notebooks/evaluation/golden_set.py` — 15 guardrail cases (7 allow, 8 refuse) plus the
+  rules a row must satisfy; `pipeline/build_golden_set.py` registers them. Split into
+  definitions and a stage because only `pipeline/` acts (ADR 0001)
+- Node names and `FINAL_ANSWER_ID` live in `setup/config.py`, not `graph/state.py`: the
+  guardrails route by them and the dependency direction runs guardrails -> graph
 - `notebooks/pipeline/verify_components.py`
 
 **Gate A3:** guardrail cases pass 100% in MLflow; disclaimer appended in code, once, on the final

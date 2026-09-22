@@ -179,6 +179,28 @@ MAX_SYNTHESIS_ATTEMPTS = int(os.getenv("FINHIVE_MAX_SYNTHESIS_ATTEMPTS", "3"))
 RECURSION_LIMIT = int(os.getenv("FINHIVE_RECURSION_LIMIT", "40"))
 
 # COMMAND ----------
+# Graph node names, and the id the final answer always occupies.
+#
+# They live here, with every other name, because `guardrails/` and `graph/` both route by these
+# strings and the direction of dependencies runs guardrails -> graph, never the reverse
+# (`agent-design.md` section 3). A typo in a `Command(goto=...)` is otherwise a runtime dead end
+# rather than an import error.
+
+NODE_INPUT_GUARDRAIL = "input_guardrail"
+NODE_CACHE_LOOKUP = "cache_lookup"
+NODE_PLANNER = "planner"
+NODE_RUN_EXPERT = "run_expert"
+NODE_SYNTHESIZER = "synthesizer"
+NODE_OUTPUT_GUARDRAIL = "output_guardrail"
+NODE_CACHE_STORE = "cache_store"
+
+# The final answer always occupies one message with this id. The synthesizer writes it and the
+# output guardrail rewrites it on a retry; because the id matches, `add_messages` *replaces*
+# rather than appends. That is what guarantees the answer is `messages[-1]`, so a consumer that
+# reads only the last message never sees an earlier draft (section 11.2).
+FINAL_ANSWER_ID = "finhive-final-answer"
+
+# COMMAND ----------
 # Secrets. Key *names* only -- a value exists solely in the Databricks secret scope.
 
 SECRET_SCOPE = os.getenv("FINHIVE_SECRET_SCOPE", "finhive")
