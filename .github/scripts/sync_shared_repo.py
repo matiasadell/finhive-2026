@@ -9,7 +9,7 @@ SHARED_REPO_PATH = "/Workspace/Shared/finhive-2026"
 
 def main() -> None:
     host = os.environ.get("DATABRICKS_HOST")
-    token = os.environ.get("DATABRICKS_CLIENT_SECRET")
+    token = os.environ.get("DATABRICKS_TOKEN")
 
     if not host:
         raise SystemExit("DATABRICKS_HOST env var is required")
