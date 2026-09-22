@@ -26,7 +26,7 @@ worse than none.
 | 1 | `setup/config.py` + `llm/` + the runner | A1 | **Code complete — gate A1 pending a workspace run** |
 | 2 | `tools/` | A2 | **Code complete — 19 tools green on the fixture; gate A2 pending gold** |
 | 3 | `guardrails/` + `graph/opinion.py` | A3 | **Code complete — verified on a stub model; gate A3 pending MLflow** |
-| 4 | `agents/` + planner + synthesizer | A4 (part 1) | Not started |
+| 4 | `agents/` + planner + synthesizer | A4 (part 1) | **Code complete — 9 component checks green on a stub model** |
 | 5 | `graph/build.py` + assemble stage | A4 (part 2) | Not started — **first that needs real gold tables** |
 | 6 | `serving/` + release stages + job spec | A7 | Not started — **the PR to `main` opens here** |
 | 7 | News analyst | A5 + A6 | Not started — blocked on the data side |
@@ -217,14 +217,23 @@ message only.
 **Watch for:** the research/advice line was calibrated on a larger model. If the small `guard_in`
 endpoint fails the cases, move up one size rather than loosening the prompt.
 
-### Step 4 — `agents/` + planner + synthesizer · gate A4, part 1
+### Step 4 — `agents/` + planner + synthesizer · gate A4, part 1 · **code complete**
 
 - `notebooks/agents/base.py` — `OPINION_CONTRACT` (defined exactly once) + `build_expert_agent`
 - `notebooks/agents/{technical,quant_risk,fundamental,macro}_analyst.py`
 - `notebooks/graph/planner.py` — `PlannerOutput`; the routing rules live in the prompt, ticker
   resolution and the full-panel fallback live in code
 - `notebooks/graph/synthesizer.py` — `fallback_answer`; the revision block on a retry
-- Panel cases of the golden set; extends `verify_components.py`
+- `notebooks/agents/panel.py` — the roster: who exists and what each covers. Adding the news
+  analyst at step 7 is one entry here
+- `notebooks/agents/checks.py` — one expert, one canned question, held to `OPINION_CONTRACT`
+  using the real card parser, which is **injected** because agents/ may not import graph/
+- 6 panel cases in the golden set; `verify_components.py` extended to 9 checks
+
+**A tension worth knowing about:** `OPINION_CONTRACT` lives in `agents/base.py` and the parser
+that reads it lives in `graph/opinion.py`, on opposite sides of the dependency edge. Nothing
+at import time stops them drifting apart -- only each expert's check does, and only because
+the stage hands it the real parser.
 
 **Gate:** crypto convenes no fundamental analyst, a pure macro question convenes only the macro
 one, each expert makes at least one tool call and emits a well-formed judgement.

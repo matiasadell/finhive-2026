@@ -6,8 +6,9 @@
 # MAGIC this stage exercises the pieces built on top of it -- the card and consensus arithmetic,
 # MAGIC both guardrails, the planner, the synthesizer and each expert.
 # MAGIC
-# MAGIC Coverage grows with the tree: `graph/opinion` and the two guardrails today; the planner,
-# MAGIC the synthesizer and the five experts join at step 4, `graph/cache_node` at step 9.
+# MAGIC Coverage grows with the tree: the card arithmetic, both guardrails, the planner, the
+# MAGIC synthesizer and four experts today. `agents/news_analyst` joins at step 7 and
+# MAGIC `graph/cache_node` at step 9.
 
 # COMMAND ----------
 
@@ -39,7 +40,13 @@ for name, where in sorted(check_import_names(NOTEBOOKS_ROOT)["resolved"].items()
 
 # COMMAND ----------
 
-from graph import opinion
+from agents import (
+    fundamental_analyst,
+    macro_analyst,
+    quant_risk_analyst,
+    technical_analyst,
+)
+from graph import opinion, planner, synthesizer
 from guardrails import input_guardrail, output_guardrail
 from llm import gateway
 from setup import config
@@ -81,6 +88,9 @@ ctx = {
     "read_table": read_table,
     "panel": panel,
     "panel_source": panel_source,
+    # agents/ may not import graph/, so the expert checks are handed the real card parser here
+    # rather than importing it. See agents/checks.py.
+    "build_card": opinion.build_card,
 }
 
 # COMMAND ----------
@@ -91,6 +101,12 @@ run_stage(
         Check("graph/opinion", opinion.check),
         Check("guardrails/input_guardrail", input_guardrail.check),
         Check("guardrails/output_guardrail", output_guardrail.check),
+        Check("graph/planner", planner.check),
+        Check("graph/synthesizer", synthesizer.check, needs=("graph/opinion",)),
+        Check("agents/technical_analyst", technical_analyst.check),
+        Check("agents/quant_risk_analyst", quant_risk_analyst.check),
+        Check("agents/fundamental_analyst", fundamental_analyst.check),
+        Check("agents/macro_analyst", macro_analyst.check),
     ],
     ctx,
 )

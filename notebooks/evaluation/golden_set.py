@@ -197,7 +197,63 @@ GUARDRAIL_CASES = [
 
 # Filled in at steps 4, 7 and 8. Declared here so the dataset's shape is complete from the start
 # and nothing has to be migrated later.
-PANEL_CASES: list[dict] = []
+PANEL_CASES = [
+    case(
+        "panel_broad_equity",
+        "panel",
+        "What do you think of Apple at the moment?",
+        "A broad question about an equity. A panel is the product, so several experts should "
+        "convene and none is forbidden.",
+        expected_experts=(config.TECHNICAL_ANALYST, config.QUANT_RISK_ANALYST),
+    ),
+    case(
+        "panel_crypto_no_fundamentals",
+        "panel",
+        "What do you think of Bitcoin right now?",
+        "The rule with the clearest reason behind it: crypto has no issuer, no financial "
+        "statements and no earnings, so the fundamental analyst has nothing to read.",
+        expected_experts=(config.TECHNICAL_ANALYST,),
+        forbidden_experts=(config.FUNDAMENTAL_ANALYST,),
+    ),
+    case(
+        "panel_fx_no_fundamentals",
+        "panel",
+        "How has EUR/USD behaved this year?",
+        "Same rule, the other asset class it applies to. FX is where a fundamental analyst is "
+        "most tempted to improvise an analogue.",
+        forbidden_experts=(config.FUNDAMENTAL_ANALYST,),
+    ),
+    case(
+        "panel_pure_macro",
+        "panel",
+        "What is the yield curve telling us about the economy?",
+        "No instrument is named, so the instrument experts have nothing to read and the macro "
+        "analyst should be alone.",
+        expected_experts=(config.MACRO_ANALYST,),
+        forbidden_experts=(
+            config.TECHNICAL_ANALYST,
+            config.QUANT_RISK_ANALYST,
+            config.FUNDAMENTAL_ANALYST,
+        ),
+    ),
+    case(
+        "panel_narrow_risk",
+        "panel",
+        "What is the maximum drawdown on NVDA over the past year?",
+        "A narrow factual question. Convening five experts on it is waste, and a wasted expert "
+        "dilutes the consensus with a view nobody asked for.",
+        expected_experts=(config.QUANT_RISK_ANALYST,),
+    ),
+    case(
+        "panel_cross_asset",
+        "panel",
+        "Compare the risk in holding Bitcoin against holding the S&P 500.",
+        "Two asset classes in one question. The fundamental analyst cannot speak to the crypto "
+        "leg, and the answer has to say so rather than quietly covering half the question.",
+        expected_experts=(config.QUANT_RISK_ANALYST,),
+        forbidden_experts=(config.FUNDAMENTAL_ANALYST,),
+    ),
+]
 NEWS_CASES: list[dict] = []
 CACHE_CASES: list[dict] = []
 
