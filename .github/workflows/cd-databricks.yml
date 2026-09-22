@@ -31,4 +31,4 @@ jobs:
         run: python .github/scripts/deploy_databricks_jobs.py
 
       - name: Sync the shared Repos checkout to main
-        run: python .github/scripts/sync_shared_repo.py
+        run: python .github/scripts/run_sync_notebook.py
