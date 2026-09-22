@@ -16,7 +16,7 @@ def deploy(w: WorkspaceClient, spec: dict) -> None:
 
     existing = next(iter(w.jobs.list(name=name)), None)
     if existing:
-        w.jobs.reset(job_id=existing.job_id, new_settings=JobSettings(name=name, settings))
+        w.jobs.reset(job_id=existing.job_id, new_settings=JobSettings(name=name, tasks=settings))
         print(f"updated job '{name}' (job_id={existing.job_id})")
     else:
         created = w.jobs.create(name=name, **settings.as_shallow_dict())
