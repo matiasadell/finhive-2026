@@ -1,6 +1,6 @@
 from databricks.sdk import WorkspaceClient
 
-NOTEBOOK_PATH = "/Workspace/Shared/finhive-2026/sync_repo"
+NOTEBOOK_PATH = "/Workspace/Shared/finhive-2026/.github/scripts/sync_repo"
 
 
 def main() -> None:
