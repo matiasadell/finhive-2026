@@ -27,7 +27,7 @@ worse than none.
 | 2 | `tools/` | A2 | **Code complete — 19 tools green on the fixture; gate A2 pending gold** |
 | 3 | `guardrails/` + `graph/opinion.py` | A3 | **Code complete — verified on a stub model; gate A3 pending MLflow** |
 | 4 | `agents/` + planner + synthesizer | A4 (part 1) | **Code complete — 9 component checks green on a stub model** |
-| 5 | `graph/build.py` + assemble stage | A4 (part 2) | Not started — **first that needs real gold tables** |
+| 5 | `graph/build.py` + assemble stage | A4 (part 2) | **Code complete — runs end to end on a stub; gate A4 needs real gold** |
 | 6 | `serving/` + release stages + job spec | A7 | Not started — **the PR to `main` opens here** |
 | 7 | News analyst | A5 + A6 | Not started — blocked on the data side |
 | 8 | Golden set and judges | A8 | Not started |
@@ -238,10 +238,20 @@ the stage hands it the real parser.
 **Gate:** crypto convenes no fundamental analyst, a pure macro question convenes only the macro
 one, each expert makes at least one tool call and emits a well-formed judgement.
 
-### Step 5 — `graph/build.py` + assemble stage · gate A4, part 2 · **needs real gold**
+### Step 5 — `graph/build.py` + assemble stage · gate A4, part 2 · **code complete, needs real gold**
 
 - `notebooks/graph/build.py` — nodes, `Send` fan-out, the single join edge, compile
-- `notebooks/pipeline/assemble_agent.py`
+- `notebooks/graph/cache_node.py` — both nodes written, `cache=None` pass-through. The graph's
+  shape is final; step 9 adds a backend behind a stated interface rather than re-wiring
+- `notebooks/pipeline/assemble_agent.py` — **no fixture fallback**, unlike the two verifying
+  stages: a graph that answers from generated data proves nothing, and this is the last gate
+  before a model is logged
+
+**Verified offline, end to end on a stub model:** the fan-out produces one card per convened
+expert (which is what proves the `operator.add` reducer), the consensus is computed, an advice
+request never reaches the panel, a crypto question convenes no fundamental analyst, and the
+retry loop exhausts at 3 drafts and ships with a warning. Three drafts produced **one**
+message, which is what proves `FINAL_ANSWER_ID` replaces rather than appends.
 
 **Gate A4:** three questions end to end; `blocked`, cards, consensus, disclaimer and `messages[-1]`
 all correct; none exhausts the three drafts.
