@@ -35,7 +35,8 @@ def main() -> None:
     if not client_secret:
         raise SystemExit("DATABRICKS_CLIENT_SECRET env var is required")
 
-    w = WorkspaceClient(host=host, client_id=client_id, client_secret=client_secret)
+    token = f"{client_id}:{client_secret}"
+    w = WorkspaceClient(host=host, token=token)
     spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
     if not spec_paths:
         raise SystemExit(f"no job specs found under {JOBS_DIR}")
