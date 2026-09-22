@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import yaml
@@ -8,12 +7,6 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import JobSettings
 
 JOBS_DIR = Path("deploy/darabricks/jobs")
-
-
-def render(spec: dict, alert_email: str) -> dict:
-    text = yaml.safe_dump(spec, sort_keys=False)
-    text = text.replace("{alert_email}", alert_email)
-    return yaml.safe_load(text)
 
 
 def deploy(w: WorkspaceClient, spec: dict) -> None:
@@ -30,17 +23,13 @@ def deploy(w: WorkspaceClient, spec: dict) -> None:
 
 
 def main() -> None:
-    alert_email = os.environ.get("ALERT_EMAIL", "")
-    if not alert_email:
-        raise SystemExit("ALERT_EMAIL env var is required")
-
     w = WorkspaceClient()
     spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
     if not spec_paths:
         raise SystemExit(f"no job specs found under {JOBS_DIR}")
 
     for spec_path in spec_paths:
-        spec = render(yaml.safe_load(spec_path.read_text()), alert_email)
+        spec = yaml.safe_load(spec_path.read_text())
         deploy(w, spec)
 
 

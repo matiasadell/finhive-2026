@@ -16,7 +16,6 @@ jobs:
       DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
       DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
       DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-      ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
     steps:
       - uses: actions/checkout@v4
 
