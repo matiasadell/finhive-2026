@@ -22,8 +22,8 @@ worse than none.
 
 | # | Step | Gate | Status |
 |---|---|---|---|
-| 0 | Foundations: ADR, data contract, layering check | CI green; contract acknowledged | **Done** — commit `1bccf1f` |
-| 1 | `setup/config.py` + `llm/` + the runner | A1 | Not started |
+| 0 | Foundations: ADR, data contract, layering check | CI green; contract acknowledged | **Done** — `1bccf1f`, `20e103a` |
+| 1 | `setup/config.py` + `llm/` + the runner | A1 | **Code complete — gate A1 pending a workspace run** |
 | 2 | `tools/` | A2 | Not started |
 | 3 | `guardrails/` + `graph/opinion.py` | A3 | Not started |
 | 4 | `agents/` + planner + synthesizer | A4 (part 1) | Not started |
@@ -123,32 +123,40 @@ No agent code. Fixes the rules and unblocks the data side.
 
 **Gate:** CI green, and the data engineer answers the six questions in contract section 7.
 
-**Note:** CI currently only runs on `pull_request` to `main`. With the work now on `matias` and no
-PR open until step 6, the checks do not fire per commit. Either run them locally before each commit
-(`python .github/scripts/check_agent_layering.py` and the two validators), or add `push:
-branches: [matias]` to `ci.yml` — worth doing in step 1.
+**Done in step 1:** `ci.yml` gained a `push` trigger on `matias`, so every commit is checked.
 
-### Step 1 — `setup/config.py` + `llm/` + the runner · gate A1
+### Step 1 — `setup/config.py` + `llm/` + the runner · gate A1 · **code complete**
 
-- `notebooks/setup/config.py` — every name, path and role setting (`agent-design.md` section 3.1's
-  table is the inventory). No logic.
+Written and verified as far as a machine without workspace credentials can:
+
+- `notebooks/setup/config.py` — every name, path and role setting. Standard library only, no logic.
 - `notebooks/llm/parsing.py` — `message_text`, `ask_structured`, `check_schema_supported`
-- `notebooks/llm/gateway.py` — `get_chat_model(role)`, token cache, `extra_body`, the 300-token
-  floor, role → model
-- `notebooks/pipeline/runner.py` — `run_stage`: checks in dependency order, skip what a red
-  prerequisite blocks, one results table, raise if any row is red
-- `notebooks/pipeline/verify_foundations.py` — covering config, gateway, parsing
-- A capability probe resolving **open item 22.11**: each of the three schemas against each of the
-  four models, N times. Decides `response_format` vs forced function calling per node.
+- `notebooks/llm/gateway.py` — `get_chat_model(role)`, `chat_model_for_name`, credential cache,
+  `extra_body`, the 300-token floor
+- `notebooks/pipeline/runner.py` — `run_stage`, `check_import_names`
+- `notebooks/pipeline/verify_foundations.py` — the stage
+- `notebooks/pipeline/probe_model_capabilities.py` + `docs/runbooks/model-capability-probe.md`
 
-**Gate A1:** every role answers; one tool-calling round trip; each schema validates on both models
-of the routed pair and both guardrail endpoints. Record the probe's output in the commit or a
-runbook.
+**Verified locally:** the layering check is clean; `message_text` handles all six shapes;
+`check_schema_supported` catches `anyOf`, `$ref`/`$defs`, `additionalProperties` and `pattern` with
+the exact JSON pointer; the runner passes, fails, skips a blocked check and raises.
 
-**Watch for:** the generic top-level import names (`agents`, `graph`, `tools`, `llm`) colliding
-with an installed distribution — `openai-agents` installs as `agents`. Have the probe assert each
-resolves to our own module. Also `notebooks/` on `sys.path` from a stage notebook (open item
-22.12) — solve it once in `runner.py`.
+**Gate A1 is NOT met yet.** It needs a workspace, and cannot be closed from a laptop:
+
+1. Run `pipeline/verify_foundations` on Databricks. Three green rows: `setup/config`,
+   `llm/gateway`, `llm/parsing`.
+2. Run `pipeline/probe_model_capabilities` and paste its table into the runbook.
+
+Only then is step 2 worth starting — every `tools/` check runs on the gateway this step builds.
+
+**Known risks, both now guarded rather than theoretical:**
+
+- **`setup` and `tools` are shadowable top-level names.** Both collisions were observed on the
+  development laptop: a stray `setup.py` on an `easy-install.pth`, and an installed `tools`
+  distribution. `check_import_names` fails the stage on a name we own that resolves elsewhere, and
+  warns on a name we are about to own. It runs before any other import in every stage notebook.
+- **`notebooks/` on `sys.path`** (open item 22.12) is a four-line prologue at the head of each
+  stage notebook. It cannot be a helper: nothing can import the thing that makes imports work.
 
 ### Step 2 — `tools/` · gate A2
 
@@ -258,8 +266,8 @@ Semantic cache (blocked on the three checks of section 14.1) and Lakebase memory
 | 4 | Benchmark for `beta`, including for crypto | Data engineer | Step 2 |
 | 5 | Correlation window and universe | Data engineer | Step 2 |
 | 6 | The eight extra FRED series — in scope? | Data engineer | Step 2's macro tools |
-| 7 | Does `response_format` hold on all four models? | Resolved by step 1's probe | Step 3 |
-| 8 | Do the generic import names resolve to our modules? | Resolved by step 1's probe | Everything |
+| 7 | Does `response_format` hold on all four models? | **Probe written, not yet run** | Step 3 |
+| 8 | Do the generic import names resolve to our modules? | **Resolved** — `check_import_names`, in every stage | — |
 
 ---
 

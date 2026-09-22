@@ -8,9 +8,9 @@ rule needs a different reader, and `agent-design.md` section 3.3 says what it ha
 Four passes, all over the AST:
 
 1. Direction   -- a folder may only import the folders below it.
-2. Third party -- `setup/` is standard library only; `tools/` and `graph/opinion.py` may not
-                  reach for langchain, mlflow, pyspark or databricks; nothing outside
-                  `pipeline/` may import pyspark.
+2. Third party -- `setup/` is standard library only, `llm/parsing.py` adds pydantic; `tools/`
+                  and `graph/opinion.py` may not reach for langchain, mlflow, pyspark or
+                  databricks; nothing outside `pipeline/` may import pyspark.
 3. Platform    -- `dbutils` and `spark` are Databricks notebook globals that do not exist in the
                   serving container, so nothing outside `pipeline/` may reference them.
 4. Side effect -- no `print` at module level outside `pipeline/`: importing a module must do
@@ -61,20 +61,27 @@ ALLOWED_INTERNAL: dict[str, frozenset[str]] = {
     "pipeline": frozenset(AGENT_FOLDERS),
 }
 
-# Third-party roots each folder may not import. A file listed in EXCEPTIONS is exempt from the
-# roots named there, and every exception has to be justified in a comment.
+# Third-party roots that may not be imported. agent-design.md section 3.3 names exactly two
+# targets -- `tools/*` and `graph/opinion.py` -- so the ban is scoped to those rather than spread
+# across every folder. `llm/gateway.py` is the one file whose job is to reach the platform, and
+# ADR 0001 replaced the ports it would otherwise hide behind with argument passing, so widening
+# this list would only force that access somewhere less honest.
+PURE_LAYER_BAN = frozenset(
+    {"langchain", "langchain_core", "langgraph", "mlflow", "pyspark", "databricks"}
+)
+
 FORBIDDEN_THIRD_PARTY: dict[str, frozenset[str]] = {
-    # The pure layers. agent-design.md section 3.3 protects them by this list rather than by
-    # living in a `core/` folder.
-    "tools": frozenset({"langchain", "langchain_core", "langgraph", "mlflow", "pyspark", "databricks"}),
-    "graph": frozenset({"pyspark", "databricks"}),
-    "agents": frozenset({"pyspark", "databricks"}),
-    "guardrails": frozenset({"pyspark", "databricks"}),
-    "cache": frozenset({"pyspark", "databricks"}),
-    "llm": frozenset({"pyspark", "databricks"}),
-    "evaluation": frozenset({"pyspark"}),
-    "serving": frozenset({"pyspark"}),
+    "tools": PURE_LAYER_BAN,
 }
+
+FORBIDDEN_PER_FILE: dict[str, frozenset[str]] = {
+    # The consensus arithmetic and the card shape. Pure by the same rule as tools/.
+    "graph/opinion.py": PURE_LAYER_BAN,
+}
+
+# Spark exists in a job and not in the serving container, and no tool may issue a query at
+# request time (agent-design.md section 5.3). Only pipeline/ runs in a job and nowhere else.
+NO_SPARK_OUTSIDE_ACTS = frozenset({"pyspark"})
 
 EXCEPTIONS: dict[str, frozenset[str]] = {
     # safe_tool is *the* file that wraps a plain function as a LangChain tool -- the single
@@ -164,7 +171,11 @@ def check_module(path: Path) -> list[str]:
         return [f"{loc}:{err.lineno}: does not parse as Python ({err.msg})"]
 
     allowed_internal = ALLOWED_INTERNAL[folder]
-    forbidden = FORBIDDEN_THIRD_PARTY.get(folder, frozenset()) - exempt
+    forbidden = FORBIDDEN_THIRD_PARTY.get(folder, frozenset())
+    forbidden |= FORBIDDEN_PER_FILE.get(name, frozenset())
+    if folder != ACTS:
+        forbidden |= NO_SPARK_OUTSIDE_ACTS
+    forbidden -= exempt
     stdlib_extra = STDLIB_PLUS.get(name, frozenset())
 
     for lineno, root in import_roots(tree, folder):
