@@ -47,6 +47,15 @@ for name, where in sorted(check_import_names(NOTEBOOKS_ROOT)["resolved"].items()
 
 from llm import gateway, parsing
 from setup import config
+from tools import (
+    fixtures,
+    fundamental_tools,
+    macro_tools,
+    panel_data,
+    risk_tools,
+    symbols,
+    technical_tools,
+)
 
 # COMMAND ----------
 
@@ -68,11 +77,40 @@ def list_secret_keys(scope: str) -> set[str]:
     return {item.key for item in dbutils.secrets.list(scope)}
 
 
+def read_table(name: str):
+    """The reader `tools/panel_data.py` receives as an argument (agent_data_contract.md)."""
+    return spark.table(name).toPandas()
+
+
+# COMMAND ----------
+
+# The gold layer is the data engineer's deliverable and may not exist yet. Every tool body is
+# pure and takes its frame as an argument, so the logic is provable against a fixture in the
+# meantime -- while `tools/panel_data` below still runs against the real tables and goes red.
+# That red row is the dependency, visible in the results table rather than buried in a plan.
+try:
+    panel = panel_data.load_panel_data(read_table)
+    panel_source = "gold"
+except Exception as exc:
+    panel = fixtures.fixture_panel_data()
+    panel_source = "FIXTURE"
+    print(f"WARNING the gold tables did not load ({type(exc).__name__}: {str(exc)[:160]}).")
+    print("        Falling back to the checked-in fixture. Every tools/ row below is therefore")
+    print("        proving logic, NOT data. tools/panel_data will report the real failure.")
+
+print(f"panel source: {panel_source}")
+print(panel_data.describe(panel))
+
+# COMMAND ----------
+
 ctx = {
     "profile": profile,
     "enable_cache": enable_cache,
     "chat": gateway.get_chat_model,
     "list_secret_keys": list_secret_keys,
+    "read_table": read_table,
+    "panel": panel,
+    "panel_source": panel_source,
 }
 
 # COMMAND ----------
@@ -83,6 +121,13 @@ run_stage(
         Check("setup/config", config.check),
         Check("llm/gateway", gateway.check, needs=("setup/config",)),
         Check("llm/parsing", parsing.check, needs=("llm/gateway",)),
+        # Reads the real gold tables. Red until the data engineer delivers them, by design.
+        Check("tools/panel_data", panel_data.check, needs=("setup/config",)),
+        Check("tools/symbols", symbols.check, needs=("setup/config",)),
+        Check("tools/technical_tools", technical_tools.check, needs=("tools/symbols",)),
+        Check("tools/risk_tools", risk_tools.check, needs=("tools/symbols",)),
+        Check("tools/fundamental_tools", fundamental_tools.check, needs=("tools/symbols",)),
+        Check("tools/macro_tools", macro_tools.check, needs=("setup/config",)),
     ],
     ctx,
 )

@@ -24,7 +24,7 @@ worse than none.
 |---|---|---|---|
 | 0 | Foundations: ADR, data contract, layering check | CI green; contract acknowledged | **Done** — `1bccf1f`, `20e103a` |
 | 1 | `setup/config.py` + `llm/` + the runner | A1 | **Code complete — gate A1 pending a workspace run** |
-| 2 | `tools/` | A2 | Not started |
+| 2 | `tools/` | A2 | **Code complete — 19 tools green on the fixture; gate A2 pending gold** |
 | 3 | `guardrails/` + `graph/opinion.py` | A3 | Not started |
 | 4 | `agents/` + planner + synthesizer | A4 (part 1) | Not started |
 | 5 | `graph/build.py` + assemble stage | A4 (part 2) | Not started — **first that needs real gold tables** |
@@ -158,19 +158,41 @@ Only then is step 2 worth starting — every `tools/` check runs on the gateway 
 - **`notebooks/` on `sys.path`** (open item 22.12) is a four-line prologue at the head of each
   stage notebook. It cannot be a helper: nothing can import the thing that makes imports work.
 
-### Step 2 — `tools/` · gate A2
+### Step 2 — `tools/` · gate A2 · **code complete**
 
-- `notebooks/tools/symbols.py` — `resolve_symbol`, the alias table, `UnknownSymbolError`. **Never
-  near-match**; an unknown symbol raises and tells the model to call `list_instruments`.
-- `notebooks/tools/safe_tool.py` — the exception-to-instruction wrapper. The one file allowed to
-  import LangChain.
-- `notebooks/tools/panel_data.py` — `PanelData`, `describe(data)`
-- `notebooks/tools/{technical,risk,fundamental,macro}_tools.py` — 19 tools
-- A checked-in `PanelData` fixture
-- Extends `verify_foundations.py`
+Nineteen tools, plus the symbol resolver, the error wrapper and the panel loader. `search_news` is
+the twentieth and belongs to step 7.
 
-**Gate A2:** all 19 return; every output carries an "as of" date; no `ERROR`; an unknown symbol
-raises. Green on the fixture; re-run against real gold when it lands.
+- `tools/formatting.py` — where the two contracts live: `as of YYYY-MM-DD` (parsed, not
+  decorative) and `n/a` for a missing value (never `0`)
+- `tools/symbols.py` — `resolve_symbol`, 40 aliases, `UnknownSymbolError`. **Never near-matches**
+- `tools/safe_tool.py` — the exception-to-instruction wrapper, the one file importing LangChain
+- `tools/panel_data.py` — `PanelData` (seven frames), `load_panel_data`, `describe`
+- `tools/{technical,risk,fundamental,macro}_tools.py` — 6 + 4 + 4 + 5 tools
+- `tools/fixtures.py` — a generated `PanelData`, deliberately awkward
+- `tools/checks.py` — the shared contract check all four families run
+- `pipeline/verify_foundations.py` extended, with the fixture fallback
+
+**Verified locally, against the fixture:** all 19 tools return, every output carries a parseable
+as-of date, none errors, an unknown symbol raises instead of near-matching, and the stage runner
+turns `tools/panel_data` red while the rest stay green.
+
+**Gate A2 needs the gold tables.** Until then `tools/panel_data.check` is red on purpose and every
+other row proves logic, not data. `verify_foundations` prints a loud warning when it falls back.
+
+**One design decision worth knowing about.** A structural absence is an answer, not an error.
+`get_fundamentals("BTC-USD")` returns a plain statement that crypto has no issuer and never will,
+rather than going through `safe_tool` — because the error text tells the model to try different
+arguments, and for crypto there are none that would work. Unknown symbols and missing rows still
+error normally.
+
+**Two departures from the letter of `agent-design.md`, both deliberate:**
+
+- `PanelData` carries **seven** frames, not the five of section 5.3. `instruments` supplies the
+  `asset_class` the planner's routing rules key off and `resolve_symbol` matches names against;
+  `macro_series` supplies the `unit` that decides points versus percent. Neither is inferable.
+- Two files the tree in section 3 does not list: `formatting.py`, because duplicating the as-of
+  contract across four families is how it drifts, and `checks.py`, for the same reason.
 
 ### Step 3 — `guardrails/` + `graph/opinion.py` · gate A3
 
