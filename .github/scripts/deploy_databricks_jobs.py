@@ -16,10 +16,10 @@ def deploy(w: WorkspaceClient, spec: dict) -> None:
 
     existing = next(iter(w.jobs.list(name=name)), None)
     if existing:
-        w.jobs.reset(job_id=existing.job_id, new_settings=JobSettings(name=name, **settings.as_dict()))
+        w.jobs.reset(job_id=existing.job_id, new_settings=JobSettings(name=name, **settings))
         print(f"updated job '{name}' (job_id={existing.job_id})")
     else:
-        created = w.jobs.create(name=name, **settings.as_dict())
+        created = w.jobs.create(name=name, **settings)
         print(f"created job '{name}' (job_id={created.job_id})")
 
 
