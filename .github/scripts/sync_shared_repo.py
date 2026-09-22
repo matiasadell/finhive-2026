@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import os
+
 from databricks.sdk import WorkspaceClient
 
 SHARED_REPO_PATH = "/Workspace/Shared/finhive-2026"
 
 
 def main() -> None:
-    w = WorkspaceClient()
+    host = os.environ.get("DATABRICKS_HOST")
+    token = os.environ.get("DATABRICKS_CLIENT_SECRET")
+
+    if not host:
+        raise SystemExit("DATABRICKS_HOST env var is required")
+    if not token:
+        raise SystemExit("DATABRICKS_CLIENT_SECRET env var is required")
+
+    w = WorkspaceClient(host=host, token=token)
     repo = next((r for r in w.repos.list() if r.path == SHARED_REPO_PATH), None)
     if repo is None:
         raise SystemExit(
