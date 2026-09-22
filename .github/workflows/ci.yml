@@ -12,6 +12,7 @@ jobs:
         check:
           - validate_job_specs.py
           - validate_notebooks.py
+          - check_agent_layering.py
     steps:
       - uses: actions/checkout@v4
 

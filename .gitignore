@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+*.egg-info/
+*.whl
+
+# Databricks CLI local profile cache
+.databricks/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Local data. ANCHORED on purpose: an unanchored `data/` would silently drop
+# any nested source directory named `data` from git entirely.
+# See docs/architecture/ARCHITECTURE_V2.md section 3.2.
+/data/
+
+# OS
+.DS_Store
+Thumbs.db
