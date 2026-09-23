@@ -17,12 +17,12 @@ def promote(spec: dict) -> dict:
             if key in notebook_task:
                 path = notebook_task[key]
                 if "finhive-2026" in path:
-                    notebook_task[key] = "/Workspace/shared/finhive-2026" + path.split("finhive-2026", 1)[1]
+                    notebook_task[key] = "/Workspace/Shared/finhive-2026" + path.split("finhive-2026", 1)[1]
         base_parameters = notebook_task.get("base_parameters", {})
         for key, value in base_parameters.items():
             if isinstance(value, str) and "finhive-2026" in value:
                 path = value
-                base_parameters[key] = "/Workspace/shared/finhive-2026" + path.split("finhive-2026", 1)[1]
+                base_parameters[key] = "/Workspace/Shared/finhive-2026" + path.split("finhive-2026", 1)[1]
     return spec
 
 
