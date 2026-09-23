@@ -99,7 +99,7 @@ h3 {
 
 **Status:** draft for review. Nothing here is built yet; nothing here asks you to change what you
 already built.
-**From:** the agent side (`notebooks/{setup,llm,tools,agents,graph,guardrails,cache,evaluation,serving}`).
+**From:** the agent side (`notebooks/agents/`).
 **To:** the data engineer who owns `notebooks/data_ingestion/` and `notebooks/data_modeling/`.
 **Date:** 2026-09-23.
 **Why a contract and not a ticket:** the agent is a panel of LLM experts that is *forbidden from
@@ -114,7 +114,7 @@ produces a confidently wrong sentence in front of a reader.
 
 Seven tables in a new schema `finhive-2026.gold`, plus one Vector Search index over the last of
 them. All names are **proposals** — see §9 if you want to change them; the agent reads them from
-`notebooks/setup/config.ipynb`, where they are literals in one cell, so a rename is a one-line edit on
+`notebooks/agents/config.ipynb`, where they are literals in one cell, so a rename is a one-line edit on
 my side and it shows up in a diff.
 
 | # | Deliverable | Grain | Feeds | Slice |
@@ -187,7 +187,7 @@ throughout this document for readability; quote it in code.
 ### 2.1 Symbols
 
 - Column `symbol`, **canonical Yahoo-style ticker**, uppercase, exactly as the upstream source names
-  it: `AAPL`, `MSFT`, `^GSPC`, and later `BTC-USD`, `EURUSD=X`.
+  it: `AAPL`, `MSFT`, `SPY`, and later `BTC-USD`, `EURUSD=X`, `^GSPC`.
 - This matters because the agent resolves what a user typed into a symbol by trying, in order: the
   literal uppercase, an alias table (`BITCOIN`→`BTC-USD`, `S&P 500`→`SPY`), then `{X}-USD`, then
   `{X}=X`, then a **unique name-prefix match** against `instruments.name`. It **never near-matches** —
@@ -392,7 +392,7 @@ I will not read it.
 | `max_drawdown` | DOUBLE | yes | decimal, **≤ 0**, within the window |
 | `beta` | DOUBLE | yes | vs `benchmark_symbol`, unitless |
 | `r_squared` | DOUBLE | yes | 0–1, of the same regression. Without it a beta of 0.9 on noise reads as meaningful |
-| `benchmark_symbol` | STRING | yes | e.g. `^GSPC`. NULL when beta is NULL |
+| `benchmark_symbol` | STRING | yes | e.g. `SPY`. NULL when beta is NULL |
 | `computed_at` | TIMESTAMP | no | UTC |
 
 **PK:** `(symbol, window)`.
@@ -461,8 +461,8 @@ Fed's actual target, `inflation`).
 
 ### 4.2 Yahoo (`config/data_ingestion/yahoo.json`)
 
-The current six symbols are enough for Slice A. `^GSPC` is already there and is the beta benchmark, so
-nothing is blocking. Universe expansion is an open parameter — §9.
+The current six symbols are enough for Slice A (`SPY ^DJI ^IXIC AAPL MSFT GOOG`). `SPY` is already
+there and is the beta benchmark, so nothing is blocking. Universe expansion is an open parameter — §9.
 
 ---
 
@@ -618,17 +618,25 @@ pdf.columns = [
 # -> date, open, high, low, close, adj_close, volume
 ```
 
-### 7.2 Append without dedup means re-runs duplicate rows — *blocks Slice A*
+### 7.2 The incremental boundary duplicates one row on every run — *blocks Slice A*
 
-Both workers do `sdf.write.mode("append")`. A re-run, a repair run, or a backfill with an earlier
-`start_date` writes the same `date` again, so `finhive-2026.yahoo.<series>` can hold several rows per
-trading day. Gold must therefore deduplicate on the natural key — `row_number()` over
-`(date)` partitioned per symbol, keeping the newest `ingested_at` — before computing anything. An
-indicator computed over duplicated days is wrong in a way nothing downstream can detect.
+The orchestrator now derives `start_date` from `max(lastObservationDate)` in `ingestionLog`, and
+passes it to `yf.download(series, start=start_date)`. **yfinance's `start` is inclusive**, and the
+worker does `sdf.write.mode("append")` — so the last already-ingested trading day is re-downloaded and
+re-appended **every single run**, not only after a re-run or a repair. One duplicate row per series per
+run, accumulating.
+
+Gold must therefore deduplicate on the natural key before computing anything: `row_number()` over
+`(date)` partitioned per symbol, keeping the newest `ingested_at`. An indicator computed over
+duplicated days is wrong in a way nothing downstream can detect — a 20-day moving average silently
+becomes a weighted one.
+
+The cheaper fix upstream, if you want it, is passing the day *after* the last observation as
+`start_date`; then append stays correct and gold needs no dedup for this reason.
 
 ### 7.3 Table names need quoting, and now so does the catalog
 
-``finhive-2026.yahoo.`^GSPC` `` needs backticks in **two** places: the catalog, for its hyphen (§2.0),
+``finhive-2026.yahoo.`^DJI` `` needs backticks in **two** places: the catalog, for its hyphen (§2.0),
 and the table, for its caret. Any generated UNION over the universe must quote every identifier, and
 the list of tables should come from `config/data_ingestion/yahoo.json` rather than from `SHOW TABLES`,
 so the config stays the single source of truth for the universe.
@@ -650,9 +658,10 @@ spark.sql("CREATE SCHEMA IF NOT EXISTS `finhive-2026`.yahoo")
 table_name = f"`finhive-2026`.yahoo.`{series}`"
 ```
 
-Already-ingested data in `finhive` would need moving or re-ingesting; with `start_date: null` on most
-series a re-ingest is the cheaper path. The rest of §7 is written against `finhive-2026` on the
-assumption this lands first.
+Already-ingested data in `finhive` would need moving or re-ingesting. A re-ingest is the cheaper path:
+the config carries no `start_date` any more, so clearing the relevant `ingestionLog` rows makes the
+next run fetch full history. The rest of §7 is written against `finhive-2026` on the assumption this
+lands first.
 
 ---
 
@@ -739,14 +748,14 @@ against cost and quota, not against correctness.
 | Universe | keep the current 6 for Slice A | The design targets 35. Expanding costs correlation rows quadratically (35 symbols = 595 pairs per window) |
 | Risk windows | `1y` required; `3m` and `3y` if cheap | |
 | Correlation windows | `90d` and `1y` | |
-| Beta benchmark | `^GSPC` | Already ingested |
+| Beta benchmark | `SPY` | Already ingested. `^GSPC` would be the purer index, but `SPY` tracks it and is what the config has |
 | Risk-free rate | `DGS3MO` | Needs §4.1 |
 | News retention | 14–30 days | Drives the §5.4 ceiling directly |
 | News symbol subset | equities + major ETFs only | Not indices, not FX |
 | News provider | your call | Quota is the constraint (§5.4) |
 | Freshness SLA | §6's table | |
-| Table names | `finhive-2026.gold.*` as above | Rename freely; they are literals in one cell of `setup/config.ipynb` |
-| Secret key naming | `snake_case`, matching the existing `fred_api_key` | I will add one key per table name to the `finhive` scope |
+| Table names | `finhive-2026.gold.*` as above | Rename freely; they are literals in one cell of `notebooks/agents/config.ipynb` |
+| Secret key naming | `kebab-case`, matching `fred-api-key` in the merged `boostrap_secrets` | I add no keys for table names — those are literals (§0). The first key I need is the news provider's, in slice D |
 
 ---
 
@@ -754,13 +763,14 @@ against cost and quota, not against correctness.
 
 So there is no ambiguity about who does what:
 
-**Mine.** Everything under `notebooks/{setup,llm,tools,agents,graph,guardrails,cache,evaluation,serving}`
-— the model access layer, the 20 tools, the five experts, the planner, consensus arithmetic, both
-guardrails, the LangGraph assembly, and the Model Serving deployment. I read every table name from the
-`finhive` secret scope. I read each gold table **once**, at model load, and never issue a Spark query at
-request time. I treat article text as untrusted data — any instruction inside an article is ignored.
+**Mine.** Everything under `notebooks/agents/` — the model access layer, the 20 tools, the five
+experts, the planner, consensus arithmetic, both guardrails, the LangGraph assembly, and the serving
+deployment. Table names are literals in `notebooks/agents/config.ipynb`. I read each gold table
+**once**, at model load, and never issue a Spark query at request time. I treat article text as untrusted data — any instruction inside an article is ignored.
 
-**Yours.** `notebooks/data_ingestion/`, `notebooks/data_modeling/`, the jobs that run them, the
+**Yours.** `notebooks/setup/` — which is for notebooks that *create* environment state, the secret
+scope and the catalog, and holds nothing of mine — plus `notebooks/data_ingestion/`,
+`notebooks/data_modeling/`, the jobs that run them, the
 `finhive-2026.gold` tables above, and the Vector Search index over `finhive-2026.gold.news` — including its
 lifecycle and rebuild rules.
 

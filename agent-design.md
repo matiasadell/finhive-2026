@@ -128,7 +128,7 @@ designed, not built — do not implement it as if it were verified.
 | The golden set, and how it is judged in MLflow (§16) | Why eval is run by hand and not scheduled (§8.4 there) |
 | The serving functions and the three release actions that run them (§17) | Model Serving in the serving tier, `apps/api` as its HTTP client |
 | Which agent notebooks to create, and the end-to-end job that deploys the agent — one task per tree notebook, no stage layer (§19) | Everything else that is a job |
-| That non-sensitive config is a literal in `setup/config.ipynb` and only credentials come from the scope (§3.1) | The scope itself, `bootstrap_secrets.py`, and `REQUIRED_KEYS` (its §5.2) |
+| That non-sensitive config is a literal in `agents/config.ipynb` and only credentials come from the scope (§3.1) | The scope itself and `notebooks/setup/boostrap_secrets.ipynb`, which is the data engineer's |
 
 ---
 
@@ -206,59 +206,62 @@ responsibility, so the tree reads the way the graph does.
 
 ```
 notebooks/
-├── setup/                         variables and paths ONLY — no logic (§3.1)
-│   └── config.ipynb                  catalog/schema, table names, the two base paths and the four
-│                                  model names (§4.1), the role table, the secret scope. VS
-│                                  endpoint/index and the MLflow names arrive with their consumer
+├── setup/                         NOT the agent's - the data engineer's, for notebooks that create
+│                                  environment state (the secret scope, catalogs). Nothing here is mine
+├── data_ingestion/                the data engineer's (architecture.md §3)
 │
-├── llm/                           model access — the ONLY folder that talks to the AI Gateway
-│   ├── gateway.ipynb                 get_chat_model(role), token cache, extra_body, 300-token floor
-│   └── parsing.ipynb                 message_text, ask_structured, check_schema_supported (§4.2)
-│
-├── tools/                         deterministic tools — what the workers may call
-│   ├── symbols.ipynb                 resolve_symbol, alias table, UnknownSymbolError
-│   ├── safe_tool.ipynb               the wrapper that turns exceptions into instructions
-│   ├── panel_data.ipynb              PanelData, loaded once from the gold tables (§5.3)
-│   ├── technical_tools.ipynb         6 tools
-│   ├── risk_tools.ipynb              4 tools
-│   ├── fundamental_tools.ipynb       4 tools
-│   ├── macro_tools.ipynb             5 tools
-│   └── news_tools.ipynb              search_news: hybrid query on the index + MMR, inside the tool (§13)
-│
-├── agents/                        the WORKERS — one ReAct expert per file
-│   ├── base.ipynb                    OPINION_CONTRACT + build_expert_agent (§8.1)
-│   ├── technical_analyst.ipynb       domain prompt + tools → agent
-│   ├── quant_risk_analyst.ipynb
-│   ├── fundamental_analyst.ipynb
-│   ├── macro_analyst.ipynb
-│   └── news_analyst.ipynb            reads the news gold table (§8.3)
-│
-├── graph/                         the SUPERVISOR: state, routing, contracts between nodes
-│   ├── state.ipynb                   FinHiveState (+ the cards reducer) and ExpertTask
-│   ├── planner.ipynb                 supervisor node: who to ask, what to ask (§7)
-│   ├── opinion.ipynb                 OpinionCard, evidence extraction, consensus (§9)
-│   ├── synthesizer.ipynb             composition node (§10)
-│   ├── cache_node.ipynb              cache_lookup / cache_store nodes (§14.1)
-│   └── build.ipynb                   assembly: nodes, Send fan-out, join, compile (§12)
-│
-├── guardrails/                    graph nodes on the only way in and the only way out
-│   ├── input_guardrail.ipynb         fails OPEN (§11.1)
-│   └── output_guardrail.ipynb        fails SAFE, DISCLAIMER in code (§11.2)
-│
-├── cache/                         semantic cache over Valkey (Aiven) — not part of the news search (§14.1)
-│   ├── valkey.ipynb                  connection, keys, TTL, sanitised secret read; every call fails open
-│   └── semantic_cache.ipynb          lookup / store, similarity, entity guard, freshness
-│
-├── evaluation/                    the golden set — the only thing here (§16)
-│   └── build_golden_set.ipynb        notebook, run by hand: builds the curated cases and registers them
-│                                  as an MLflow evaluation dataset. No harness, no judges, no scorers
-│
-└── serving/                       what makes the graph callable (§17)
-    ├── model_entry.ipynb             the ResponsesAgent that MLflow logs, and its check — the only file that
-    │                              runs inside the serving container
-    └── endpoint.ipynb                `set_served_version`, `champion_version`, `mark_champion`, plus the
-                                   `package|deploy|rollback` actions behind one `action` widget (§17, §19) —
-                                   no separate pipeline/ folder; the job runs this notebook three times
+└── agents/                        the whole agent stack, where architecture.md §3 reserves it
+    ├── config.ipynb               catalog/schema, table names, the two base paths and the four
+    │                              model names (§4.1), the role table, the secret scope. VS
+    │                              endpoint/index and the MLflow names arrive with their consumer
+    │
+    ├── llm/                           model access — the ONLY folder that talks to the AI Gateway
+    │   ├── gateway.ipynb                 get_chat_model(role), token cache, extra_body, 300-token floor
+    │   └── parsing.ipynb                 message_text, ask_structured, check_schema_supported (§4.2)
+    │
+    ├── tools/                         deterministic tools — what the workers may call
+    │   ├── symbols.ipynb                 resolve_symbol, alias table, UnknownSymbolError
+    │   ├── safe_tool.ipynb               the wrapper that turns exceptions into instructions
+    │   ├── panel_data.ipynb              PanelData, loaded once from the gold tables (§5.3)
+    │   ├── technical_tools.ipynb         6 tools
+    │   ├── risk_tools.ipynb              4 tools
+    │   ├── fundamental_tools.ipynb       4 tools
+    │   ├── macro_tools.ipynb             5 tools
+    │   └── news_tools.ipynb              search_news: hybrid query on the index + MMR, inside the tool (§13)
+    │
+    ├── experts/                       the WORKERS — one ReAct expert per file
+    │   ├── base.ipynb                    OPINION_CONTRACT + build_expert_agent (§8.1)
+    │   ├── technical_analyst.ipynb       domain prompt + tools → agent
+    │   ├── quant_risk_analyst.ipynb
+    │   ├── fundamental_analyst.ipynb
+    │   ├── macro_analyst.ipynb
+    │   └── news_analyst.ipynb            reads the news gold table (§8.3)
+    │
+    ├── graph/                         the SUPERVISOR: state, routing, contracts between nodes
+    │   ├── state.ipynb                   FinHiveState (+ the cards reducer) and ExpertTask
+    │   ├── planner.ipynb                 supervisor node: who to ask, what to ask (§7)
+    │   ├── opinion.ipynb                 OpinionCard, evidence extraction, consensus (§9)
+    │   ├── synthesizer.ipynb             composition node (§10)
+    │   ├── cache_node.ipynb              cache_lookup / cache_store nodes (§14.1)
+    │   └── build.ipynb                   assembly: nodes, Send fan-out, join, compile (§12)
+    │
+    ├── guardrails/                    graph nodes on the only way in and the only way out
+    │   ├── input_guardrail.ipynb         fails OPEN (§11.1)
+    │   └── output_guardrail.ipynb        fails SAFE, DISCLAIMER in code (§11.2)
+    │
+    ├── cache/                         semantic cache over Valkey (Aiven) — not part of the news search (§14.1)
+    │   ├── valkey.ipynb                  connection, keys, TTL, sanitised secret read; every call fails open
+    │   └── semantic_cache.ipynb          lookup / store, similarity, entity guard, freshness
+    │
+    ├── evaluation/                    the golden set — the only thing here (§16)
+    │   └── build_golden_set.ipynb        notebook, run by hand: builds the curated cases and registers them
+    │                                  as an MLflow evaluation dataset. No harness, no judges, no scorers
+    │
+    └── serving/                       what makes the graph callable (§17)
+        ├── model_entry.ipynb          the ResponsesAgent that MLflow logs — the only file that would
+        │                              run inside the serving container
+        └── endpoint.ipynb             set_served_version, champion_version, mark_champion, plus the
+                                       package|deploy|rollback actions behind one `action` widget (§17)
 ```
 
 **Every notebook defines; nothing acts on its own.** Notebooks are `.ipynb` and compose with `%run`
@@ -272,9 +275,9 @@ reading the code:
 
 | Has a `check` | Why | No `check` |
 |---|---|---|
-| `llm/gateway` | do the models answer, and does `response_format` hold on both routed models (§4.2) | `setup/config`, `graph/state` — variables and types |
+| `llm/gateway` | do the models answer, and does `response_format` hold on both routed models (§4.2) | `agents/config`, `graph/state` — variables and types |
 | `tools/panel_data` | do the gold tables exist and are they fresh | `llm/parsing` — pure; gateway's check exercises it |
-| `tools/news_tools` | does the ticker filter reach the index | `tools/safe_tool`, `agents/base` — a wrapper and a contract, exercised by their users |
+| `tools/news_tools` | does the ticker filter reach the index | `tools/safe_tool`, `experts/base` — a wrapper and a contract, exercised by their users |
 | `cache/valkey` | is Valkey reachable at all (§14.1) | `graph/opinion`, `tools/symbols` — pure arithmetic and pure resolution |
 
 Everything else is proven by the golden set in MLflow (§16), which is a quality question, not a smoke
@@ -283,18 +286,18 @@ test. `evaluation/build_golden_set` is the one notebook that acts unconditionall
 **Direction of dependencies** — each folder may use the ones to its left, never to its right:
 
 ```
-setup ← llm ← tools ← agents ← graph ← serving
+config ← llm ← tools ← experts ← graph ← serving
               guardrails ─────↗
               cache     ← graph/cache_node   (uses llm/ for the query embedding)
               evaluation  (imports nothing of ours; nothing uses it)
 ```
 
-`agents/` never imports `graph/` (a worker does not know it is on a panel); `graph/` is the
+`experts/` never imports `graph/` (a worker does not know it is on a panel); `graph/` is the
 only place that knows both. `llm/` imports nothing of ours except `setup/`.
 
-### 3.1 What `setup/` may and may not contain
+### 3.1 What `config` may and may not contain
 
-**Non-sensitive configuration is a literal in `setup/config.ipynb`; only real credentials live in the
+**Non-sensitive configuration is a literal in `agents/config.ipynb`; only real credentials live in the
 secret scope, read with `dbutils.secrets.get`.** That is `architecture.md` §2 principle 4 — *secret
 names in config, secret values only in the scope* — and it is what lets
 `docs/development/contracts/contract1.md` and `config` be confronted by reading them side by side,
@@ -314,14 +317,14 @@ SECRET_SCOPE = "finhive"          # a secret scope is not a catalog
 MODEL_ROUTER = f"{CATALOG}.default.finhive_router"
 ```
 
-| Belongs in `setup/config.ipynb` | Does **not** |
+| Belongs in `agents/config.ipynb` | Does **not** |
 |---|---|
 | table names, catalog and schema, model service names, the two base URLs (§4.1), VS endpoint/index names — as literals | any function with logic, and no `check`: it is variables only, the same category §18 already grants `graph/state.ipynb` |
 | the role table: role → temperature, max_tokens (§4.1) | algorithm thresholds (`0.62`, `0.5`, `0.35`, `MIN_AMBIGUOUS_COUNT`) and the 300-token floor — measured properties that stay in the file that owns them, next to the note saying how they were measured |
-| the secret scope name, and the *key names* the agent reads | secret values, anywhere, ever — including as a fallback default |
+| the secret scope name, and the *key names* the agent reads — **kebab-case**, matching `fred-api-key` in the data engineer's `boostrap_secrets` | secret values, anywhere, ever — including as a fallback default |
 | `DEFAULT_MAX_CONCURRENCY`, `MODEL_TIMEOUT_SECONDS`, `MAX_SYNTHESIS_ATTEMPTS`, `GRAPH_RECURSION_LIMIT`, the cache TTL per question type (§14.1), the registered-model name and its `champion` alias (§17) | prompts, and the `DISCLAIMER` text (legal text, owned by `guardrails/`) |
 
-`setup/` calls nothing and reads nothing at run time; a `%run` of it costs assigning some variables.
+`config` calls nothing and reads nothing at run time; a `%run` of it costs assigning some variables.
 A name arrives in it together with the notebook that consumes it — the VS endpoint and index names
 wait for `tools/news_tools`, the MLflow experiment and registered-model name for `serving/`, because
 inventing an identifier earlier means inventing one nobody has confirmed. The agent has no credential
@@ -333,7 +336,7 @@ There is no `prompts/` folder. Each system prompt is a module-level constant in 
 node that owns it, with a **subject-prefixed name** (`PLANNER_SYSTEM_PROMPT`,
 `GRADE_SYSTEM_PROMPT`, `SYNTHESIZER_SYSTEM_PROMPT`). The reason is `%run`: every module shares
 one namespace, and two `_SYSTEM_PROMPT` constants overwrite each other silently. The one
-exception is `OPINION_CONTRACT`, which exists exactly once, in `agents/base.ipynb`, because the
+exception is `OPINION_CONTRACT`, which exists exactly once, in `experts/base.ipynb`, because the
 moment two experts disagree about what "bullish" means the consensus arithmetic stops meaning
 anything.
 
@@ -346,7 +349,7 @@ anything.
 
 1. **`if __name__ == "__main__"` does not work here.** `%run` is not an import — `__name__` stays
    `"__main__"` in the target too, so a guard fires on every caller. That is why nothing auto-runs
-   (§3): a notebook defines, and the caller decides when to spend money. `%run ../llm/gateway` costs
+   (§3): a notebook defines, and the caller decides when to spend money. `%run ./llm/gateway` costs
    assigning names; `check()` costs nine model calls and is called by hand.
 2. **Unique global names** (§3.2). One namespace per run, which is exactly the constraint that makes
    subject-prefixed prompt constants mandatory rather than tidy.
@@ -372,7 +375,7 @@ for agent code); dual-mode files that `%run` and re-import on `NameError` (unrea
 folder of stage notebooks that only call other notebooks' checks (indirection with no consumer).
 
 **Consequence for CI.** `check_notebook_layering.py`'s `%run` pass sees almost nothing inside
-these folders, so its checks become import-based: `setup/` may import
+these folders, so its checks become import-based: `agents/config` may import
 nothing but the standard library, and `llm/parsing.ipynb` nothing but the standard library and `pydantic`; `graph/opinion.ipynb` and
 `tools/*` (except the file that wraps a LangChain tool) may not import `langchain`, `mlflow`, `pyspark` or `databricks`; and
 the direction above is enforced as a folder-level import contract. The pure logic that used to
@@ -396,20 +399,21 @@ form.
 
 ## 4. Model access (`llm/`)
 
-One module (`notebooks/llm/gateway.ipynb`) is the only code in the repo that constructs a model
+One module (`notebooks/agents/llm/gateway.ipynb`) is the only code in the repo that constructs a model
 client. Its surface is `get_chat_model(role, temperature, max_tokens)` and
 `get_embedding_model()`; every other folder receives that function as an argument and never
 learns what a gateway is.
 
 ### 4.1 The model names, and roles
 
-There are four model names and **two** base URLs — one client shape, two paths, because the two
-`finhive` services and Databricks' own pay-per-token models answer in different places. All of it is a
-literal in `setup/config.ipynb` (§3.1):
+There are four model names and **two paths off one host** — one client shape, because the two
+`finhive` services and Databricks' own pay-per-token models answer in different places. The paths and
+the names are literals in `agents/config.ipynb` (§3.1); the host is never written down, it comes from
+the notebook context together with the token (§5.3 there: no PAT anywhere):
 
 ```python
-AI_GATEWAY_URL = f"{WORKSPACE_URL}/ai-gateway/mlflow/v1"   # the two finhive services
-SERVING_URL    = f"{WORKSPACE_URL}/serving-endpoints"      # Databricks pay-per-token models
+AI_GATEWAY_PATH = "/ai-gateway/mlflow/v1"   # the two finhive services
+SERVING_PATH    = "/serving-endpoints"      # Databricks pay-per-token models
 
 MODEL_ROUTER     = f"{CATALOG}.default.finhive_router"     # CATALOG = "finhive-2026"
 MODEL_EMBEDDINGS = f"{CATALOG}.default.finhive_embeddings"
@@ -421,7 +425,8 @@ MODELS_ROUTED = ("databricks-meta-llama-3-3-70b-instruct", "databricks-gpt-oss-2
 ```
 
 Both paths are OpenAI-compatible, so one `ChatOpenAI` construction serves both and only `base_url` and
-`model` differ. Auth is the notebook-context token, cached — no PAT anywhere (`architecture.md` §5.3).
+`model` differ. `gateway` makes one cached call to the notebook context and gets the host and the token
+from it, so no workspace URL is a literal and the code runs unedited in any workspace.
 
 | Name | Purpose | Consumed by |
 |---|---|---|
@@ -564,7 +569,7 @@ structured round trip through it exercises one of the two models with 70/30 odds
 `response_format` and GPT-OSS honours it, that probe passes seven times in ten while the graph fails
 intermittently in production — a green check and a broken system. So `llm/gateway`'s `check` (§18)
 probes structured output **three** times: through the router service, and against each model in
-`MODELS_ROUTED` **directly**, on `SERVING_URL`. Only the direct pair is conclusive. If a model does not
+`MODELS_ROUTED` **directly**, on `SERVING_PATH`. Only the direct pair is conclusive. If a model does not
 honour `response_format`, that node switches to **function calling** — a single tool whose arguments are
 the same schema, with the call forced — which both models document; nothing about the schemas or the
 callers changes.
@@ -757,7 +762,7 @@ else about *who* to ask is the model's, within the rules of §6.
 
 ---
 
-## 8. Experts (`agents/`)
+## 8. Experts (`experts/`)
 
 ```python
 build_expert_agent(chat, name, domain_prompt, tools, max_tokens=1600) =
@@ -863,7 +868,7 @@ prompt, not in a node.
 | Medallion pipeline | `notebooks/data_ingestion/pipelines/news.py` | `bronze_news_raw` (append-only, `source`, `ingested_at`) → `silver_news` (deduplicated by `row_number()` over `(symbol, url)`) → `gold_news`, the table the index is built on. Expectations on write: non-null `url` and `published_at`, `published_at` not in the future, row-count bounds; failures land in `quality_violations` and fail the task |
 | Index build | `notebooks/data_modeling/build_index.py` | The existing job of `architecture.md`, pointed at `gold_news`; its lifecycle rules (two-sided convergence, progress-based waits, `force_rebuild`) are its own. **Not built by this document** |
 | Job notebook / job | `data_ingestion/ingest_news.py`, `deploy/databricks/jobs/ingest_news.yaml` | Same prologue as the other ingest notebooks; serverless, exact pins, `requests` only. In `finhive_daily_pipeline`, followed by the `build_index` sync task |
-| Secret | provider key (`tavily-api-key`) in `REQUIRED_KEYS` of `bootstrap_secrets.py` | Sanitised on every read, redacted in logs — `architecture.md` §5.2 |
+| Secret | provider key (`tavily-api-key`) added to the `secrets` list in `notebooks/setup/boostrap_secrets.ipynb`, kebab-case | read with `dbutils.secrets.get`, sanitised, redacted in logs |
 | Config | key name, lookback, max articles per symbol, symbol subset, retention window | Data, not code (`architecture.md` §5.1) |
 | Probe | `capability_probe` adds outbound reach to the news provider | Fails the environment check early |
 
@@ -997,7 +1002,7 @@ offending figures, because the retry needs to say *what* to fix.
 **The loop.** The node is a conditional router, not a terminal step:
 
 ```python
-MAX_SYNTHESIS_ATTEMPTS = 3                       # in setup/config.ipynb — total drafts, not extra retries
+MAX_SYNTHESIS_ATTEMPTS = 3                       # in agents/config.ipynb — total drafts, not extra retries
 
 verdict = ask_structured(...)                    # a GroundednessVerdict
 if verdict.grounded or not evidence:
@@ -1038,7 +1043,7 @@ happens (§16.2); if retries are common, the verifier is the problem, not the sy
 ### 11.3 Which models the guardrails use, and why
 
 The guardrails run on **Databricks-hosted pay-per-token endpoints**, not on `finhive_router`, and
-therefore on the second base URL — `SERVING_URL`, not `AI_GATEWAY_URL` (§4.1). They are the most
+therefore on the second path — `SERVING_PATH`, not `AI_GATEWAY_PATH` (§4.1). They are the most
 frequent and most mechanical model calls in the graph — one classification per question, and up to
 three groundedness checks over a long evidence base — so they are where the cheapest adequate model
 pays off most.
@@ -1247,7 +1252,7 @@ stored symbols by the same alias resolution the tools use, and any mismatch is a
 **Freshness is set at store time, from the plan.** At lookup there is no plan yet, but at store
 there is, so the TTL is the **shortest** among the experts that ran: an answer is only as fresh as
 its stalest input. Price-driven experts (technical, risk): minutes. News: hours. Macro and
-fundamentals only: longer. The mapping is a variable in `setup/config.ipynb`. A hit prints
+fundamentals only: longer. The mapping is a variable in `agents/config.ipynb`. A hit prints
 "Cached answer from <time>" — added in code, from `cached_at`.
 
 **Failure mode.** Valkey unreachable, slow (short timeout) or returning garbage → **skip the cache
@@ -1265,7 +1270,7 @@ guardrail.
 **Departures from `architecture.md`, to reconcile there.** §4.2 there says Aiven access happens from
 `apps/*` on AKS and never from notebooks. The cache puts an Aiven connection inside the served
 agent, which needs: a Valkey service on Aiven; its connection URI in the secret scope
-(`valkey-uri` in `REQUIRED_KEYS`, sanitised on every read, redacted in logs); a config entry; the
+(`valkey-uri` in the `secrets` list of `boostrap_secrets`, sanitised on every read, redacted in logs); a config entry; the
 probe checks above; and an exact-pinned `valkey` in the agent environment.
 
 **Acceptance.** Ship only if a fixed question set shows fewer tokens and lower latency at equal
@@ -1312,7 +1317,7 @@ and compared in its UI — so no metric code, ladder or scorer is written here.
 ### 16.1 The golden set (`evaluation/build_golden_set.ipynb`)
 
 One notebook, run by hand, that writes the curated cases and registers them as an **MLflow evaluation
-dataset** (its name is a variable in `setup/config.ipynb`). The cases are a list in the notebook, reviewed
+dataset** (its name is a variable in `agents/config.ipynb`). The cases are a list in the notebook, reviewed
 in a PR: an expectation is only worth having if a person vouched for it, and an expectation an LLM
 generated and nobody read measures the wrong thing without anyone noticing. An LLM may propose
 alternative *phrasings* of a question; the expectation on each row stays human-written. Re-running the
@@ -1432,7 +1437,7 @@ def set_served_version(ctx, version): ...   # create/update the endpoint via the
 
 def package_agent(ctx):
     # log_model(python_model="notebooks/serving/model_entry.ipynb", code_paths=["notebooks"], pip_requirements=…)
-    # register in Unity Catalog under the name in setup/config.ipynb
+    # register in Unity Catalog under the name in agents/config.ipynb
     return model_uri, model_version
 
 def deploy_agent(ctx):
@@ -1494,11 +1499,11 @@ the environment (§3.3). **Nothing calls its own `check`**: a `%run` has to stay
 invokes it in a cell. The `check` column below says what each one does where it exists, and what
 exercises the notebook where it does not. All at zero model calls unless stated.
 
-Built so far: `setup/config`, `llm/parsing`, `llm/gateway`.
+Built so far: `agents/config`, `llm/parsing`, `llm/gateway`.
 
 | Notebook | Definitions | `check` |
 |---|---|---|
-| `setup/config.ipynb` | every name, path and role setting others read (§3.1) | *no check: variables only* |
+| `agents/config.ipynb` | every name, path and role setting others read (§3.1) | *no check: variables only* |
 | `llm/gateway.ipynb` | `get_chat_model`, `get_embedding_model`: `ROLE_MODELS`, token cache, `extra_body`, 300-token floor | **the one live check**: five chat roles answer, embeddings return a vector, and structured output is probed through the router *and against each routed model directly* (§4.2) — 9 calls |
 | `llm/parsing.ipynb` | `message_text`, `ask_structured`, `check_schema_supported` (§4.2) | *no check: pure; gateway's check exercises all three* |
 | `tools/symbols.ipynb` | `resolve_symbol`, the alias table, `UnknownSymbolError` | *no check: pure resolution over a literal alias table* |
@@ -1512,8 +1517,8 @@ Built so far: `setup/config`, `llm/parsing`, `llm/gateway`.
 | `guardrails/output_guardrail.ipynb` | the node, `GroundednessVerdict`, `DISCLAIMER` | *no check: groundedness is an MLflow judge, not a smoke test (§16.2)* |
 | `graph/state.ipynb` | `FinHiveState`, the `cards` reducer, `ExpertTask` | *no check: types only* |
 | `graph/opinion.ipynb` | card shape, evidence extraction, coercion, consensus | *no check: pure arithmetic; the golden set's panel cases are the real test* |
-| `agents/base.ipynb` | `OPINION_CONTRACT`, `build_expert_agent` | *no check: exercised by every expert* |
-| `agents/<expert>.ipynb` (×5) | one domain prompt + its tools → one expert | *no check: exercised end to end by the golden set* |
+| `experts/base.ipynb` | `OPINION_CONTRACT`, `build_expert_agent` | *no check: exercised by every expert* |
+| `experts/<expert>.ipynb` (×5) | one domain prompt + its tools → one expert | *no check: exercised end to end by the golden set* |
 | `graph/planner.ipynb` | the supervisor node, `PlannerOutput` | *no check: the golden set's panel cases assert the routing rules of §6* |
 | `graph/synthesizer.ipynb` | composition node, `fallback_answer` | *no check* |
 | `graph/cache_node.ipynb` | `cache_lookup`, `cache_store` | a miss continues, a hit ends, an outage is a miss |
@@ -1556,7 +1561,7 @@ dependency graph (the stage's internal order) on top of the one the tree already
 file for every notebook that already knew how to run itself. Both are gone:
 
 - **The job connects the notebooks of the tree directly.** Every task's `notebook_path` is a real file
-  under `notebooks/` — `setup/config`, `llm/gateway`, `tools/panel_data`, …, with the three release
+  under `notebooks/` — `agents/config`, `llm/gateway`, `tools/panel_data`, …, with the three release
   tasks all pointing at `serving/endpoint` under a different `action` (§17). There is no notebook in the
   job whose only job is to call another notebook.
 - **The dependency graph is the job's own DAG.** The order the tree notebooks must run in — `config`
@@ -1681,7 +1686,7 @@ What a job needs before it can be written:
    read before the endpoint is touched, the smoke against the *live* endpoint, `champion` moved only
    after it passes, and `rollback` on failure.
 
-Until then the four checks are run by hand, which is what they were built for: `%run ../llm/gateway`
+Until then the four checks are run by hand, which is what they were built for: `%run ./llm/gateway`
 then `check()`.
 
 ### 19.4 A release from the outside, and what a failure leaves
@@ -1694,7 +1699,7 @@ flowchart LR
         EV["Evaluate in MLflow<br/>judges + expectations"]
     end
     EV --> M["Merge to main"]
-    subgraph CI["CI: cd-databricks.yml"]
+    subgraph CI["CI: cd.yml"]
         U["upsert the job"] --> RN["trigger it"]
         RN --> SY["sync the shared Repos checkout"]
     end
@@ -1750,7 +1755,7 @@ flowchart TD
 | 2 | classify: allow or refuse | `guardrails/input_guardrail` | `guard_in` | **fails open**: the question goes on |
 | 3 | look for a fresh cached answer; a hit ends the run | `graph/cache_node` → `cache/` | `embedding` | **fails open**: treated as a miss |
 | 4 | choose the experts and write their sub-questions; resolve the tickers | `graph/planner`, `tools/symbols` | `router` | the code falls back to the full panel (or the macro analyst alone) |
-| 5 | consult the experts **in parallel** (`max_concurrency 4`); each is a ReAct loop over its own tools | `agents/<expert>`, `tools/*_tools` | `worker` | one expert raising becomes a `failed_card`; the panel goes on |
+| 5 | consult the experts **in parallel** (`max_concurrency 4`); each is a ReAct loop over its own tools | `experts/<expert>`, `tools/*_tools` | `worker` | one expert raising becomes a `failed_card`; the panel goes on |
 | 6 | turn each expert's answer into a card; evidence is recorded by code | `graph/build` → `graph/opinion` | — | no parseable judgement becomes a degraded card |
 | 7 | compute the consensus, then compose the answer | `graph/synthesizer` (+ `graph/opinion`) | `synthesizer` | an empty answer becomes `fallback_answer`, the cards verbatim |
 | 8 | verify every figure against the evidence; not grounded → back to 7 with the unsupported figures, **at most 3 drafts** | `guardrails/output_guardrail` | `guard_out` | **fails safe**: the answer ships with its disclaimer |
@@ -1758,7 +1763,7 @@ flowchart TD
 
 Steps 2 and 3 can end the run early, step 8 can send it back to 7, and steps 2, 3 and 9 never make the
 run fail. The state that carries all of this is `graph/state` (§12); the fixed limits are
-`recursion_limit=40` and `MAX_SYNTHESIS_ATTEMPTS = 3`, both variables in `setup/config.ipynb`.
+`recursion_limit=40` and `MAX_SYNTHESIS_ATTEMPTS = 3`, both variables in `agents/config.ipynb`.
 
 ---
 
@@ -1768,12 +1773,12 @@ Each step ends with something runnable and a gate. Do not start the next until i
 
 | Step | Build | Gate |
 |---|---|---|
-| **A1** ✅ built | `setup/config.ipynb`, `llm/parsing.ipynb`, `llm/gateway.ipynb` | `check()` green: every role callable, embeddings return a vector, and the probe schema validates on **each routed model directly** and on both guardrail endpoints (§4.2) |
+| **A1** ✅ built | `agents/config.ipynb`, `llm/parsing.ipynb`, `llm/gateway.ipynb` | `check()` green: every role callable, embeddings return a vector, and the probe schema validates on **each routed model directly** and on both guardrail endpoints (§4.2) |
 | **A2** | `tools/` (symbols, safe_tool, panel_data, the five domain files) — needs slice A of `contract1.md` | all 20 tools return; every output carries an as-of date; an unknown symbol raises instead of near-matching |
 | **A3** | `guardrails/` + `evaluation/build_golden_set.ipynb` (guardrail cases) | the guardrail cases pass in MLflow, 100%; disclaimer appended in code |
-| **A4** | `agents/`, `graph/` (all of it), the panel cases of the golden set | in MLflow: the right experts convened, no degraded card, every answer grounded, none needs all 3 drafts |
+| **A4** | `experts/`, `graph/` (all of it), the panel cases of the golden set | in MLflow: the right experts convened, no degraded card, every answer grounded, none needs all 3 drafts |
 | **A5** | `tools/news_tools.ipynb` (search + MMR), the news cases of the golden set (needs the `gold_news` index built in `data_modeling`) | the ticker filter returns only that ticker; unanswerable news cases return nothing |
-| **A6** | `agents/news_analyst.ipynb`, the news routing rule in the planner prompt (requires the index of §13.1 to exist first) | a news question answers with dated, attributed headlines; a symbol with no articles in the window returns `insufficient_data`; an instruction planted in an article is ignored |
+| **A6** | `experts/news_analyst.ipynb`, the news routing rule in the planner prompt (requires the index of §13.1 to exist first) | a news question answers with dated, attributed headlines; a symbol with no articles in the window returns `insufficient_data`; an instruction planted in an article is ignored |
 | **A7** | **first settle how the tree is packaged** (§3.3, §22 item 8), then `serving/*` (both files, including the three `action` branches) and `deploy/databricks/jobs/deploy_agent.yaml` | a green `finhive_deploy_agent` run; the served answer matches the in-process one; `predict_stream` yields increments |
 | **A8** | the golden set grows to ~40 questions; judges created in MLflow and written down in the runbook | first full run recorded; thresholds fixed from it |
 | **A9** | `cache/`, `graph/cache_node.ipynb` (after the three checks of §14.1), then the adaptive router | each ships only if measured to help on a fixed question set |
@@ -1829,7 +1834,7 @@ Each step ends with something runnable and a gate. Do not start the next until i
     scale-by-best normalization, and the direction of any "nothing found" check (`!=` versus `==`). Each was a
     real bug caught by a test in v1; if pytest is ever reintroduced, start with those three.
 10. **The guardrail endpoints are unverified** (§11.3): that `databricks-meta-llama-3-1-8b-instruct`
-    and `databricks-gpt-oss-20b` exist on this Free Edition workspace and answer on `SERVING_URL`, and
+    and `databricks-gpt-oss-20b` exist on this Free Edition workspace and answer on `SERVING_PATH`, and
     that the small model holds the research/advice line on the golden set. `llm/gateway`'s `check`
     answers the first two; a 404 there is a name problem, not a capability one. `MODELS_ROUTED`'s
     llama endpoint name (`databricks-meta-llama-3-3-70b-instruct`) is likewise a guess — the router is
