@@ -6,7 +6,6 @@ from pathlib import Path
 import yaml
 
 JOBS_DIR = Path("deploy/darabricks/jobs")
-USER_PREFIX = re.compile(r"^/Workspace/Users/[^/]+/finhive-2026/")
 SHARED_PREFIX = "/Workspace/Shared/finhive-2026/"
 
 
