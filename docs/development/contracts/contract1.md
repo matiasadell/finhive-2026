@@ -112,19 +112,19 @@ produces a confidently wrong sentence in front of a reader.
 
 ## 0. What is being asked, in one table
 
-Six tables in a new schema `finhive.gold`, plus one Vector Search index. All names are
+Six tables in a new schema `finhive-2026.gold`, plus one Vector Search index. All names are
 **proposals** — see §9 if you want to change them; the agent reads every table name from the
 `finhive` secret scope, so renaming costs me one secret update, not a code change.
 
 | # | Deliverable | Grain | Feeds | Slice |
 |---|---|---|---|---|
-| 1 | `finhive.gold.instruments` | one row per symbol | `list_instruments`, symbol resolution, expert routing | **A** |
-| 2 | `finhive.gold.technical_indicators` | one row per (symbol, trade_date) | `technical_analyst` — 6 tools | **A** |
-| 3 | `finhive.gold.macro_series` | one row per (series_id, observation_date) | `macro_analyst` — 5 tools | **B** |
-| 4 | `finhive.gold.macro_series_catalog` | one row per series_id | the same 5 tools (units, curve order) | **B** |
-| 5 | `finhive.gold.risk_metrics` | one row per (symbol, window) | `quant_risk_analyst` — 2 tools | **C** |
-| 6 | `finhive.gold.correlations` | one row per (symbol_a, symbol_b, window) | `quant_risk_analyst` — 2 tools | **C** |
-| 7 | `finhive.gold.news` + its Delta Sync index | one row per (symbol, url, chunk_no) | `news_analyst` — 1 tool | **D** |
+| 1 | `finhive-2026.gold.instruments` | one row per symbol | `list_instruments`, symbol resolution, expert routing | **A** |
+| 2 | `finhive-2026.gold.technical_indicators` | one row per (symbol, trade_date) | `technical_analyst` — 6 tools | **A** |
+| 3 | `finhive-2026.gold.macro_series` | one row per (series_id, observation_date) | `macro_analyst` — 5 tools | **B** |
+| 4 | `finhive-2026.gold.macro_series_catalog` | one row per series_id | the same 5 tools (units, curve order) | **B** |
+| 5 | `finhive-2026.gold.risk_metrics` | one row per (symbol, window) | `quant_risk_analyst` — 2 tools | **C** |
+| 6 | `finhive-2026.gold.correlations` | one row per (symbol_a, symbol_b, window) | `quant_risk_analyst` — 2 tools | **C** |
+| 7 | `finhive-2026.gold.news` + its Delta Sync index | one row per (symbol, url, chunk_no) | `news_analyst` — 1 tool | **D** |
 | — | *fundamentals* | — | `fundamental_analyst` | **deferred to contract 2** (§3.7) |
 
 **Please deliver in slices, in this order.** Each slice unblocks one expert end to end, and I can
@@ -158,6 +158,24 @@ Three consequences for you:
 
 These are the parts most likely to cause a silently wrong answer, so they are stated once here and
 assumed everywhere below.
+
+### 2.0 One catalog, and its name needs backticks
+
+There is a single Unity Catalog catalog, **`finhive-2026`** — the same one that holds the model
+services (`finhive-2026.default.finhive_router`). Everything lives under it: your source schemas and
+the new `gold` schema alike.
+
+**The hyphen makes it an identifier that must be backtick-quoted in every SQL reference**, because
+`finhive-2026` otherwise tokenizes as `finhive` minus `2026`:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS `finhive-2026`.gold;     -- works
+CREATE SCHEMA IF NOT EXISTS finhive-2026.gold;       -- parse error
+```
+
+This applies to `spark.table()` and `spark.sql()` too, since both go through the same parser, and it
+is why the agent side stores the quoted form. Written plainly as `finhive-2026.gold.instruments`
+throughout this document for readability; quote it in code.
 
 ### 2.1 Symbols
 
@@ -226,7 +244,7 @@ State the primary key and enforce it. `agent-design.md`'s consumer will assert u
 
 ## 3. The tables
 
-### 3.1 `finhive.gold.instruments`
+### 3.1 `finhive-2026.gold.instruments`
 
 The universe, and the only place that says what kind of thing each symbol is. Small — one row per
 symbol.
@@ -252,7 +270,7 @@ rule.
 `first_date` / `last_date` let `list_instruments` state its own coverage instead of the model guessing
 it.
 
-### 3.2 `finhive.gold.technical_indicators`
+### 3.2 `finhive-2026.gold.technical_indicators`
 
 The largest table, and the one Slice A turns on. **Full available history per symbol** — a tool
 returns price history, so this is not an as-of snapshot.
@@ -291,7 +309,7 @@ than data, and the rules live in my tools next to the note explaining how they w
 Both moving-average crossovers need the *previous* row, which is why full history matters and an
 as-of snapshot would not do.
 
-### 3.3 `finhive.gold.macro_series`
+### 3.3 `finhive-2026.gold.macro_series`
 
 Long format, every FRED series in one table. Frequencies differ per series and that is fine — see
 §2.3 on not forward-filling.
@@ -310,7 +328,7 @@ paired with its five-year percentile — "the VIX is 18" is not an answer, "the 
 percentile of its five-year range" is. I compute that percentile myself from this history; no column
 needed.
 
-### 3.4 `finhive.gold.macro_series_catalog`
+### 3.4 `finhive-2026.gold.macro_series_catalog`
 
 Small, hand-curated, and it carries the three pieces of metadata without which the macro tools cannot
 format a sentence correctly.
@@ -339,7 +357,7 @@ arithmetically true and only one is how anyone talks about rates. So:
 curve sorted alphabetically by `series_id` is not a curve), and `get_inflation_picture` selects
 `category = 'inflation'`.
 
-### 3.5 `finhive.gold.risk_metrics`
+### 3.5 `finhive-2026.gold.risk_metrics`
 
 **As-of snapshot only** — one row per symbol per window, holding the latest computation. Please do not
 accumulate history here; if you want a history table for your own auditing, name it something else and
@@ -374,7 +392,7 @@ Please state in the pipeline whether VaR is historical or parametric — I have 
 above, because the expert's whole reason for being on the panel is to say when tails got worse, and a
 normal assumption hides exactly that.
 
-### 3.6 `finhive.gold.correlations`
+### 3.6 `finhive-2026.gold.correlations`
 
 Pairwise, and stored **once per unordered pair** to halve the row count and remove any chance of the
 two directions disagreeing.
@@ -444,7 +462,7 @@ nothing is blocking. Universe expansion is an open parameter — §9.
 News is the one dataset where the agent queries a live service at request time rather than reading a
 frame — a Vector Search index, which is a read-only call to a Databricks service, not a table scan.
 
-### 5.1 `finhive.gold.news`
+### 5.1 `finhive-2026.gold.news`
 
 | Column | Type | Null? | Meaning |
 |---|---|---|---|
@@ -482,7 +500,7 @@ replacement of keys; replacing the table wholesale forces a full index rebuild. 
 
 | Requirement | Value |
 |---|---|
-| Type | Delta Sync index over `finhive.gold.news` |
+| Type | Delta Sync index over `finhive-2026.gold.news` |
 | `index_subtype` | **`HYBRID`** — dense cosine plus sparse keyword, fused server-side |
 | Embeddings | **Managed**, on the `text` column. Free Edition has no Direct Vector Access, so the tool sends `query_text` and the index embeds it. Vectors are never uploaded or returned |
 | Filterable columns | `symbol`, `published_at` |
@@ -545,9 +563,9 @@ which is the worst place to find out, because the endpoint accepts the deploymen
 answer:
 
 ```sql
-GRANT USE CATALOG ON CATALOG finhive TO `<principal>`;
-GRANT USE SCHEMA  ON SCHEMA  finhive.gold TO `<principal>`;
-GRANT SELECT      ON SCHEMA  finhive.gold TO `<principal>`;
+GRANT USE CATALOG ON CATALOG `finhive-2026` TO `<principal>`;
+GRANT USE SCHEMA  ON SCHEMA  `finhive-2026`.gold TO `<principal>`;
+GRANT SELECT      ON SCHEMA  `finhive-2026`.gold TO `<principal>`;
 -- plus read on the Vector Search index and its endpoint
 ```
 
@@ -572,7 +590,7 @@ pdf.columns = [
 ]
 ```
 
-For a single-ticker download, yfinance returns `(Price, Ticker)` tuples, so `finhive.yahoo.AAPL` ends
+For a single-ticker download, yfinance returns `(Price, Ticker)` tuples, so `finhive-2026.yahoo.AAPL` ends
 up with columns `open_aapl`, `high_aapl`, `close_aapl`, `adj close_aapl`, `volume_aapl`. Two
 consequences:
 
@@ -594,16 +612,28 @@ pdf.columns = [
 ### 7.2 Append without dedup means re-runs duplicate rows — *blocks Slice A*
 
 Both workers do `sdf.write.mode("append")`. A re-run, a repair run, or a backfill with an earlier
-`start_date` writes the same `date` again, so `finhive.yahoo.<series>` can hold several rows per
+`start_date` writes the same `date` again, so `finhive-2026.yahoo.<series>` can hold several rows per
 trading day. Gold must therefore deduplicate on the natural key — `row_number()` over
 `(date)` partitioned per symbol, keeping the newest `ingested_at` — before computing anything. An
 indicator computed over duplicated days is wrong in a way nothing downstream can detect.
 
-### 7.3 Table names need quoting
+### 7.3 Table names need quoting, and now so does the catalog
 
-`finhive.yahoo.`^GSPC`` requires backticks. Any generated UNION over the universe must quote every
-identifier, and the list of tables should come from `config/data_ingestion/yahoo.json` rather than from
-`SHOW TABLES`, so the config stays the single source of truth for the universe.
+``finhive-2026.yahoo.`^GSPC` `` needs backticks in **two** places: the catalog, for its hyphen (§2.0),
+and the table, for its caret. Any generated UNION over the universe must quote every identifier, and
+the list of tables should come from `config/data_ingestion/yahoo.json` rather than from `SHOW TABLES`,
+so the config stays the single source of truth for the universe.
+
+### 7.4 The workers create a second catalog
+
+Both workers run `spark.sql("CREATE CATALOG IF NOT EXISTS finhive")` and write to
+`finhive.yahoo.<series>` / `finhive.fred.<series>`. The workspace convention is a **single** catalog,
+`finhive-2026` (§2.0), so as written the ingestion creates and populates a catalog that nothing else
+uses — and the gold tables this contract asks for would sit in a different one from their own sources.
+
+Whether the fix is to repoint the workers or to keep `finhive` for raw and `finhive-2026` for gold is
+yours to decide; the agent side only needs to know which catalog holds `gold`, and this document
+assumes `finhive-2026`. If you choose otherwise, say so and I change one line of configuration.
 
 ---
 
@@ -615,66 +645,66 @@ am unblocked — you do not need me to sign anything off.
 ```sql
 -- 1. no duplicate primary keys anywhere
 SELECT symbol, trade_date, COUNT(*) c
-FROM finhive.gold.technical_indicators
+FROM `finhive-2026`.gold.technical_indicators
 GROUP BY 1, 2 HAVING c > 1;                      -- expect 0 rows
 
 -- 2. every instrument has enough history for a 200-day moving average
 SELECT i.symbol, COUNT(t.trade_date) n
-FROM finhive.gold.instruments i
-LEFT JOIN finhive.gold.technical_indicators t USING (symbol)
+FROM `finhive-2026`.gold.instruments i
+LEFT JOIN `finhive-2026`.gold.technical_indicators t USING (symbol)
 WHERE i.is_active
 GROUP BY 1 HAVING n < 200;                       -- expect 0 rows
 
 -- 3. indicators are in range, or NULL — never zero-filled
-SELECT COUNT(*) FROM finhive.gold.technical_indicators
+SELECT COUNT(*) FROM `finhive-2026`.gold.technical_indicators
 WHERE rsi_14 IS NOT NULL AND (rsi_14 < 0 OR rsi_14 > 100);        -- expect 0
-SELECT COUNT(*) FROM finhive.gold.technical_indicators
+SELECT COUNT(*) FROM `finhive-2026`.gold.technical_indicators
 WHERE realized_vol_20d IS NOT NULL AND realized_vol_20d <= 0;     -- expect 0
-SELECT COUNT(*) FROM finhive.gold.technical_indicators
+SELECT COUNT(*) FROM `finhive-2026`.gold.technical_indicators
 WHERE drawdown IS NOT NULL AND drawdown > 0;                      -- expect 0
 
 -- 4. warm-up really is NULL and not 0 (this is the check that catches a zero-fill)
 SELECT symbol, MIN(trade_date) first_day,
        MIN(CASE WHEN sma_200 IS NOT NULL THEN trade_date END) first_sma200
-FROM finhive.gold.technical_indicators GROUP BY 1;
+FROM `finhive-2026`.gold.technical_indicators GROUP BY 1;
 -- expect first_sma200 to be ~199 trading days after first_day, never equal to it
 
 -- 5. asset_class vocabulary is closed
-SELECT DISTINCT asset_class FROM finhive.gold.instruments;
+SELECT DISTINCT asset_class FROM `finhive-2026`.gold.instruments;
 -- expect a subset of: equity, etf, index, crypto, fx
 
 -- 6. correlations: one direction only, and in range
-SELECT COUNT(*) FROM finhive.gold.correlations WHERE symbol_a >= symbol_b;      -- expect 0
-SELECT COUNT(*) FROM finhive.gold.correlations
+SELECT COUNT(*) FROM `finhive-2026`.gold.correlations WHERE symbol_a >= symbol_b;      -- expect 0
+SELECT COUNT(*) FROM `finhive-2026`.gold.correlations
 WHERE correlation IS NOT NULL AND (correlation < -1 OR correlation > 1);        -- expect 0
 
 -- 7. losses are negative (§2.4)
-SELECT COUNT(*) FROM finhive.gold.risk_metrics
+SELECT COUNT(*) FROM `finhive-2026`.gold.risk_metrics
 WHERE (var_95_1d IS NOT NULL AND var_95_1d > 0)
    OR (max_drawdown IS NOT NULL AND max_drawdown > 0);                          -- expect 0
 
 -- 8. macro: every series has a catalog row, 5y of history, and no future dates
-SELECT s.series_id FROM (SELECT DISTINCT series_id FROM finhive.gold.macro_series) s
-LEFT JOIN finhive.gold.macro_series_catalog c USING (series_id)
+SELECT s.series_id FROM (SELECT DISTINCT series_id FROM `finhive-2026`.gold.macro_series) s
+LEFT JOIN `finhive-2026`.gold.macro_series_catalog c USING (series_id)
 WHERE c.series_id IS NULL;                                                      -- expect 0 rows
 SELECT series_id, MIN(observation_date), MAX(observation_date)
-FROM finhive.gold.macro_series GROUP BY 1;
+FROM `finhive-2026`.gold.macro_series GROUP BY 1;
 -- expect MIN <= today - 5 years for every series
-SELECT DISTINCT unit, change_is_absolute FROM finhive.gold.macro_series_catalog;
+SELECT DISTINCT unit, change_is_absolute FROM `finhive-2026`.gold.macro_series_catalog;
 -- eyeball: percent/index-point series must be true, level series false
 
 -- 9. yield curve is orderable
-SELECT series_id, maturity_years FROM finhive.gold.macro_series_catalog
+SELECT series_id, maturity_years FROM `finhive-2026`.gold.macro_series_catalog
 WHERE category = 'yield_curve' ORDER BY maturity_years;
 -- expect every row to have a non-null maturity_years
 
 -- 10. news: stable unique keys, no future publications
-SELECT COUNT(*) - COUNT(DISTINCT chunk_id) FROM finhive.gold.news;              -- expect 0
-SELECT COUNT(*) FROM finhive.gold.news WHERE published_at > current_timestamp(); -- expect 0
+SELECT COUNT(*) - COUNT(DISTINCT chunk_id) FROM `finhive-2026`.gold.news;              -- expect 0
+SELECT COUNT(*) FROM `finhive-2026`.gold.news WHERE published_at > current_timestamp(); -- expect 0
 ```
 
 For the index, the check that matters is **two-sided convergence**: the index's row count and
-`finhive.gold.news`'s row count must agree after a sync, in both directions. An index with fewer rows
+`finhive-2026.gold.news`'s row count must agree after a sync, in both directions. An index with fewer rows
 is mid-sync; an index with more rows has orphaned keys from a previous build, and that is the symptom
 that a positional `chunk_id` or an `overwrite` slipped in.
 
@@ -696,7 +726,7 @@ against cost and quota, not against correctness.
 | News symbol subset | equities + major ETFs only | Not indices, not FX |
 | News provider | your call | Quota is the constraint (§5.4) |
 | Freshness SLA | §6's table | |
-| Table names | `finhive.gold.*` as above | Rename freely; I read names from secrets |
+| Table names | `finhive-2026.gold.*` as above | Rename freely; I read names from secrets |
 | Secret key naming | `snake_case`, matching the existing `fred_api_key` | I will add one key per table name to the `finhive` scope |
 
 ---
@@ -712,7 +742,7 @@ guardrails, the LangGraph assembly, and the Model Serving deployment. I read eve
 request time. I treat article text as untrusted data — any instruction inside an article is ignored.
 
 **Yours.** `notebooks/data_ingestion/`, `notebooks/data_modeling/`, the jobs that run them, the
-`finhive.gold` tables above, and the Vector Search index over `finhive.gold.news` — including its
+`finhive-2026.gold` tables above, and the Vector Search index over `finhive-2026.gold.news` — including its
 lifecycle and rebuild rules.
 
 **Neither of us, yet.** Fundamentals (contract 2), and the semantic cache (agent side, but it depends
