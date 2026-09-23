@@ -1,8 +1,4 @@
-from __future__ import annotations
-
-import re
 from pathlib import Path
-
 import yaml
 
 JOBS_DIR = Path("deploy/darabricks/jobs")
