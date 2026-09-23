@@ -1,4 +1,4 @@
-name: CD Databricks
+name: CD
 
 on:
   push:
@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  deploy-jobs:
     runs-on: ubuntu-latest
     environment: free
     env:
@@ -17,18 +17,36 @@ jobs:
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('.github/scripts/requirements.txt') }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - run: pip install -r .github/scripts/requirements.txt
-
       - name: Promote job specs to the shared checkout path
         run: python .github/scripts/promote_job_specs.py
-
       - name: Deploy job definitions
         run: python .github/scripts/deploy_databricks_jobs.py
 
+
+
+  
+  make-pull-on-git-folder:
+    needs: deploy-jobs
+    runs-on: ubuntu-latest
+    environment: free
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/scripts/requirements.txt
+      - run: pip install -r .github/scripts/requirements.txt
       - name: Sync the shared Repos checkout to main
         run: python .github/scripts/sync_shared_repo.py

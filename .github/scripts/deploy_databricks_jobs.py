@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from pathlib import Path
 
@@ -24,24 +22,13 @@ def deploy(w: WorkspaceClient, spec: dict) -> None:
         print(f"created job '{name}' (job_id={created.job_id})")
 
 
-def main() -> None:
-    host = os.environ.get("DATABRICKS_HOST")
-    token = os.environ.get("DATABRICKS_TOKEN")
+w = WorkspaceClient()
+spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
+if not spec_paths:
+    raise SystemExit(f"no job specs found under {JOBS_DIR}")
 
-    if not host:
-        raise SystemExit("DATABRICKS_HOST env var is required")
-    if not token:
-        raise SystemExit("DATABRICKS_CLIENT_SECRET env var is required")
-
-    w = WorkspaceClient(host=host, token=token)
-    spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
-    if not spec_paths:
-        raise SystemExit(f"no job specs found under {JOBS_DIR}")
-
-    for spec_path in spec_paths:
-        spec = yaml.safe_load(spec_path.read_text())
-        deploy(w, spec)
+for spec_path in spec_paths:
+    spec = yaml.safe_load(spec_path.read_text())
+    deploy(w, spec)
 
 
-if __name__ == "__main__":
-    main()
