@@ -22,15 +22,8 @@ def deploy(w: WorkspaceClient, spec: dict) -> None:
 
 
 def main() -> None:
-    host = os.environ.get("DATABRICKS_HOST")
-    token = os.environ.get("DATABRICKS_TOKEN")
 
-    if not host:
-        raise SystemExit("DATABRICKS_HOST env var is required")
-    if not token:
-        raise SystemExit("DATABRICKS_CLIENT_SECRET env var is required")
-
-    w = WorkspaceClient(host=host, token=token)
+    w = WorkspaceClient()
     spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
     if not spec_paths:
         raise SystemExit(f"no job specs found under {JOBS_DIR}")
