@@ -159,11 +159,17 @@ Three consequences for you:
 These are the parts most likely to cause a silently wrong answer, so they are stated once here and
 assumed everywhere below.
 
-### 2.0 One catalog, and its name needs backticks
+### 2.0 One catalog: `finhive-2026`
 
-There is a single Unity Catalog catalog, **`finhive-2026`** — the same one that holds the model
-services (`finhive-2026.default.finhive_router`). Everything lives under it: your source schemas and
-the new `gold` schema alike.
+There is exactly one Unity Catalog catalog, **`finhive-2026`**, and it holds everything — the model
+services (`finhive-2026.default.finhive_router`, `…finhive_embeddings`) and **every medallion layer**.
+No second catalog for raw, none for gold, none for models.
+
+| Layer | Where | Who |
+|---|---|---|
+| bronze, silver | `finhive-2026.<your schemas>` | yours; the agent never reads them and does not care how they are named |
+| **gold** | **`finhive-2026.gold`** | yours to produce, the only thing the agent reads (§1) |
+| model services | `finhive-2026.default` | already there |
 
 **The hyphen makes it an identifier that must be backtick-quoted in every SQL reference**, because
 `finhive-2026` otherwise tokenizes as `finhive` minus `2026`:
@@ -624,16 +630,26 @@ and the table, for its caret. Any generated UNION over the universe must quote e
 the list of tables should come from `config/data_ingestion/yahoo.json` rather than from `SHOW TABLES`,
 so the config stays the single source of truth for the universe.
 
-### 7.4 The workers create a second catalog
+### 7.4 The workers create a second catalog — *needs repointing*
 
 Both workers run `spark.sql("CREATE CATALOG IF NOT EXISTS finhive")` and write to
-`finhive.yahoo.<series>` / `finhive.fred.<series>`. The workspace convention is a **single** catalog,
-`finhive-2026` (§2.0), so as written the ingestion creates and populates a catalog that nothing else
-uses — and the gold tables this contract asks for would sit in a different one from their own sources.
+`finhive.yahoo.<series>` / `finhive.fred.<series>` — a `finhive` catalog, without the year. There is
+only one catalog and it is `finhive-2026` (§2.0), so as written the ingestion creates and fills a
+catalog nothing else uses, and the gold tables would sit in a different catalog from their own
+sources.
 
-Whether the fix is to repoint the workers or to keep `finhive` for raw and `finhive-2026` for gold is
-yours to decide; the agent side only needs to know which catalog holds `gold`, and this document
-assumes `finhive-2026`. If you choose otherwise, say so and I change one line of configuration.
+The fix is in the two `spark.sql` lines and the `table_name` f-string of each worker, and the
+catalog needs its backticks:
+
+```python
+spark.sql("CREATE CATALOG IF NOT EXISTS `finhive-2026`")
+spark.sql("CREATE SCHEMA IF NOT EXISTS `finhive-2026`.yahoo")
+table_name = f"`finhive-2026`.yahoo.`{series}`"
+```
+
+Already-ingested data in `finhive` would need moving or re-ingesting; with `start_date: null` on most
+series a re-ingest is the cheaper path. The rest of §7 is written against `finhive-2026` on the
+assumption this lands first.
 
 ---
 
