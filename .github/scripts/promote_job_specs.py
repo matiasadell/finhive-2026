@@ -25,17 +25,12 @@ def promote(spec: dict) -> dict:
     return spec
 
 
-def main() -> None:
-    spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
-    if not spec_paths:
-        raise SystemExit(f"no job specs found under {JOBS_DIR}")
+spec_paths = sorted(JOBS_DIR.glob("*.yaml"))
+if not spec_paths:
+    raise SystemExit(f"no job specs found under {JOBS_DIR}")
 
-    for spec_path in spec_paths:
-        spec = yaml.safe_load(spec_path.read_text())
-        promoted = promote(spec)
-        spec_path.write_text(yaml.safe_dump(promoted, sort_keys=False))
-        print(f"promoted {spec_path}")
-
-
-if __name__ == "__main__":
-    main()
+for spec_path in spec_paths:
+    spec = yaml.safe_load(spec_path.read_text())
+    promoted = promote(spec)
+    spec_path.write_text(yaml.safe_dump(promoted, sort_keys=False))
+    print(f"promoted {spec_path}")
