@@ -1,7 +1,7 @@
 [
-    {"series": "GDP", "start_date": null},
-    {"series": "CPIAUCSL", "start_date": null},
-    {"series": "UNRATE", "start_date": null},
-    {"series": "FEDFUNDS", "start_date": null},
-    {"series": "DGS10", "start_date": null}
+    {"series": "GDP"},
+    {"series": "CPIAUCSL"},
+    {"series": "UNRATE"},
+    {"series": "FEDFUNDS"},
+    {"series": "DGS10"}
 ]
