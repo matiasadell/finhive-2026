@@ -1,23 +1,28 @@
-from __future__ import annotations
-
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import ResourceDoesNotExist
 
-SHARED_REPO_PATH = "/Workspace/Shared/finhive-2026"
 GIT_URL = "https://github.com/matiasadell/finhive-2026"
-GIT_PROVIDER = "gitHub"
-
+SHARED_REPO_PATH = f"/Workspace/Shared/{GIT_URL.split('/')[-1]}"
 
 def main() -> None:
     w = WorkspaceClient()
-    repo = next((r for r in w.repos.list() if r.path == SHARED_REPO_PATH), None)
 
-    if repo is None:
-        print(f"no Databricks Repo found at {SHARED_REPO_PATH!r}, creating it...")
-        repo = w.repos.create(url=GIT_URL, provider=GIT_PROVIDER, path=SHARED_REPO_PATH)
-        print(f"created Databricks Repo at {SHARED_REPO_PATH} (repo_id={repo.id})")
+    try:
+        status = w.workspace.get_status(SHARED_REPO_PATH)
+        print(status)
+        repo_id = status.object_id
+    except Exception as e:
+        print(f"no Git folder found at {SHARED_REPO_PATH!r}, creating it...")
+        repo = w.repos.create(
+            url=GIT_URL,
+            provider="gitHub",
+            path=SHARED_REPO_PATH
+        )
+        repo_id = repo.id
+        print(f"created Git folder at {SHARED_REPO_PATH} (repo_id={repo_id})")
 
-    w.repos.update(repo_id=repo.id, branch="main")
-    print(f"synced {SHARED_REPO_PATH} to main")
+    w.repos.update(repo_id=repo_id, branch="main")
+    print(f"synced {SHARED_REPO_PATH} to main (repo_id={repo_id})")
 
 
 if __name__ == "__main__":
