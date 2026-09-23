@@ -126,8 +126,9 @@ designed, not built — do not implement it as if it were verified.
 | News analyst: tool, prompt, routing rule (§8.3) | The news adapter, medallion pipeline, chunk table, index sync, job and secret (§8.3 lists them) |
 | Semantic cache: nodes, similarity, freshness (§14.1) | The Aiven Valkey service, its secret, network reachability and the capability probe (§14.1 lists them) |
 | The golden set, and how it is judged in MLflow (§16) | Why eval is run by hand and not scheduled (§8.4 there) |
-| The serving functions and the pipeline stages that run them | Model Serving in the serving tier, `apps/api` as its HTTP client |
-| Which agent notebooks to create, and the end-to-end job that deploys the agent | Everything else that is a job |
+| The serving functions and the three release actions that run them (§17) | Model Serving in the serving tier, `apps/api` as its HTTP client |
+| Which agent notebooks to create, and the end-to-end job that deploys the agent — one task per tree notebook, no stage layer (§19) | Everything else that is a job |
+| That every name in `setup/config.py` is a secret-backed environment variable, and how the served copy receives it (§3.1, §17) | The scope itself, `bootstrap_secrets.py`, and `REQUIRED_KEYS` (its §5.2) |
 
 ---
 
@@ -252,29 +253,27 @@ notebooks/
 │   └── build_golden_set.py        notebook, run by hand: builds the curated cases and registers them
 │                                  as an MLflow evaluation dataset. No harness, no judges, no scorers
 │
-├── pipeline/                      the stages the job runs — the notebooks that ACT (§19)
-│   ├── runner.py                  module: run a stage's checks in dependency order, skip what a failure
-│   │                              blocks, print the results table
-│   ├── verify_foundations.py      stage: setup, llm, tools, cache
-│   ├── verify_components.py       stage: opinion, guardrails, planner, synthesizer, the five experts, cache node
-│   ├── assemble_agent.py          stage: graph/build end to end, then serving/model_entry
-│   ├── package_agent.py           stage: log the model and register it
-│   ├── deploy_agent.py            stage: update the endpoint, smoke it, promote the `champion` alias
-│   └── rollback_agent.py          stage: restore the `champion` version — runs only after a failure
-│
 └── serving/                       what makes the graph callable (§17)
     ├── model_entry.py             the ResponsesAgent that MLflow logs, and its check — the only file that
     │                              runs inside the serving container
-    └── endpoint.py                helpers the deploy and rollback stages share: set the served version,
-                                   read and move the `champion` alias
+    └── endpoint.py                `set_served_version`, `champion_version`, `mark_champion`, plus the
+                                   `package|deploy|rollback` actions behind one `action` widget (§17, §19) —
+                                   no separate pipeline/ folder; the job runs this notebook three times
 ```
 
-**Every notebook defines; the notebooks of `pipeline/` act.** Each notebook of the tree also defines a
-`check` — its own smoke test — and a stage notebook runs the checks of the notebooks it is responsible
-for (§19). Four notebooks have no `check` because other checks exercise them: `graph/state.py` (types),
-`tools/safe_tool.py` (a wrapper), `agents/base.py` (the contract and the builder) and
-`serving/endpoint.py` (exercised by the deploy stage). The only other
-notebook that acts is `evaluation/build_golden_set.py`.
+**Every notebook defines; almost every notebook can also act, on its own.** Each notebook of the tree
+defines a `check(ctx)` — its own smoke test — and, right below it, an `if __name__ == "__main__":` block
+that reads its widgets, builds the one piece of context it needs, calls `check(ctx)`, prints the result
+and raises if it failed (§3.3, §19). That block is dead code on import — `__name__` is the module's own
+name, never `"__main__"` — so nothing about servability changes; it only means the notebook no longer
+needs a second file to invoke it. **There is no `pipeline/` folder and no runner module**: the job of
+§19 points each task straight at the tree notebook it runs, and the dependency graph between tasks
+*is* the dependency graph already drawn in §19.3, expressed as ordinary `depends_on` edges instead of a
+hand-rolled skip rule. Four notebooks have no `check` because other checks exercise them: `graph/state.py`
+(types), `tools/safe_tool.py` (a wrapper), `agents/base.py` (the contract and the builder) and
+`serving/endpoint.py`'s helper functions (exercised by its own `package`/`deploy`/`rollback` actions).
+The only other notebook that acts unconditionally, with no `check` to gate it, is
+`evaluation/build_golden_set.py`.
 
 **Direction of dependencies** — each folder may use the ones to its left, never to its right:
 
@@ -290,15 +289,36 @@ only place that knows both. `llm/` imports nothing of ours except `setup/`.
 
 ### 3.1 What `setup/` may and may not contain
 
+**Every value in `setup/config.py` is read with `os.getenv(NAME)`, and none of them carries a literal
+default in code any more** — not even a model name or a table name. The *value* lives in exactly one
+place, the Databricks secret scope (`architecture.md` §5.2), and arrives as an environment variable:
+injected into a job task's environment for every notebook run as a job, and into the Model Serving
+endpoint's `environment_vars` (`{{secrets/scope/key}}`, §17) for the served copy — the same file, the
+same `os.getenv` call, two different places the value is supplied from. `setup/config.py` therefore
+still holds only *names* — the environment-variable / secret-key names other notebooks read later — it
+is the map from a stable Python identifier to a secret key, never the value itself:
+
+```python
+AI_GATEWAY_ROUTER_MODEL      = os.getenv("FINHIVE_GATEWAY_ROUTER_MODEL")       # secret key: gateway-router-model
+AI_GATEWAY_EMBEDDINGS_MODEL  = os.getenv("FINHIVE_GATEWAY_EMBEDDINGS_MODEL")   # secret key: gateway-embeddings-model
+GOLD_TECHNICAL_TABLE         = os.getenv("FINHIVE_GOLD_TECHNICAL_TABLE")      # secret key: gold-technical-table
+# ... one line per name below, no `default=` argument anywhere in this file
+```
+
 | Belongs in `setup/config.py` | Does **not** |
 |---|---|
-| table names, catalog and schema, model service names, VS endpoint/index names | any function with logic |
-| the role table: role → temperature, max_tokens (§4.1) | algorithm thresholds (`0.62`, `0.5`, `0.35`, `MIN_AMBIGUOUS_COUNT`) — they are measured properties of the algorithm and stay in the file that owns them, next to the note saying how they were measured |
-| MLflow experiment path, secret scope and key *names* | secret values |
-| `DEFAULT_MAX_CONCURRENCY`, `MODEL_TIMEOUT_SECONDS`, `MAX_SYNTHESIS_ATTEMPTS`, the cache TTL per question type (§14.1), the Valkey secret *name*, the registered-model name and its `champion` alias (§17) | prompts, and the `DISCLAIMER` text (legal text, owned by `guardrails/`) |
+| the `os.getenv(NAME)` line for table names, catalog and schema, model service names, VS endpoint/index names — no literal value | any function with logic |
+| the role table: role → temperature, max_tokens (§4.1) — temperature/token caps are numeric *tuning*, not secret material, so they stay literal here | algorithm thresholds (`0.62`, `0.5`, `0.35`, `MIN_AMBIGUOUS_COUNT`) — they are measured properties of the algorithm and stay in the file that owns them, next to the note saying how they were measured |
+| MLflow experiment path, secret scope name, and the **environment-variable names** that resolve to secret-scope keys | secret values, anywhere, ever — including as a fallback default |
+| `DEFAULT_MAX_CONCURRENCY`, `MODEL_TIMEOUT_SECONDS`, `MAX_SYNTHESIS_ATTEMPTS`, the cache TTL per question type (§14.1), the registered-model name and its `champion` alias (§17) — these are tuning constants, not identifiers of an external resource, so they stay literal | prompts, and the `DISCLAIMER` text (legal text, owned by `guardrails/`) |
 
-`setup/` reads nothing at import time except environment variables and widget defaults, and
-calls nothing.
+`setup/` reads nothing at import time except environment variables and widget defaults, and calls
+nothing. A missing environment variable is therefore a missing *secret*, not a missing default, and
+`llm/gateway`'s `check` (§18) is what turns that into a named failure instead of a `None` surfacing
+three calls downstream. `REQUIRED_KEYS` in `bootstrap_secrets.py` (`architecture.md` §5.2) grows to
+list every one of these names, table names and model names included, not only literal credentials —
+the distinction `architecture.md` used to draw between "secret value" and "config data" collapses for
+the agent tree specifically: here, everything `setup/config.py` names is provisioned the same way.
 
 ### 3.2 Prompts live with the node that uses them
 
@@ -312,21 +332,57 @@ anything.
 
 ### 3.3 Composition, and the one place `%run` cannot reach
 
-`%run` is a notebook magic; it does not exist inside a Model Serving container. So:
+`%run` is a notebook magic; it does not exist inside a Model Serving container. `architecture.md`'s
+general rule is still `%run` — that is how `data_ingestion` and `data_modeling` compose (its §6.2) —
+but every notebook of the agent tree sits downstream of `serving/model_entry.py`, which is loaded
+*inside the serving container*, so the whole agent tree has to be reachable by plain `import` from
+that one file. That is not a stylistic preference, it is the one hard constraint everything below
+follows from:
 
-1. **Notebooks define; only the stage notebooks act.** No `dbutils`, no `spark`, no widget, no client
-   construction, no `print` at the top level of any notebook of the tree. Each notebook defines its
-   functions and one more: `check(ctx) -> dict`, its own smoke test (§19), which is a definition like
-   any other and does nothing until a stage calls it. The notebooks of `pipeline/` are the ones that
-   read widgets, call `dbutils` and run checks. That keeps every file importable from the serving
-   container, where none of those exist.
+1. **Every notebook defines, and every notebook with a `check` can also act, on its own — there is no
+   separate notebook whose only job is to call another notebook's `check`.** No `dbutils`, no `spark`,
+   no widget, no client construction, no `print` at the top level of the *importable* part of any
+   notebook — that part is exactly what has to survive being loaded inside the serving container. Each
+   notebook defines its functions, then `check(ctx) -> dict` (its own smoke test, §19), then, as its
+   last cell:
+   ```python
+   # COMMAND ----------
+   if __name__ == "__main__":                         # never true on import — dead code inside serving
+       dbutils.widgets.text("profile", "free")
+       ctx = build_ctx(dbutils.widgets.get("profile")) # the one piece of context this notebook's check needs
+       result = check(ctx)
+       print(result)
+       if not result.get("ok", False):
+           raise RuntimeError(f"{result}")
+   ```
+   A Databricks job task that points `notebook_path` straight at, say, `notebooks/llm/gateway.py`
+   *is* that notebook's verification step: nothing else has to exist to run it. `import mymodule`
+   never sets `mymodule.__name__` to `"__main__"`, so the guard never fires when the serving container
+   (or any other notebook) imports the file — the same property that made `if __name__ == "__main__"`
+   the standard way to make an ordinary Python script dual-purpose applies here unchanged. **There is
+   no `pipeline/` folder.** The job of §19 is a plain Databricks Jobs DAG over these notebooks
+   directly, with `depends_on` reproducing the dependency graph already drawn in §19.3 — Databricks'
+   own `run_if: ALL_SUCCESS` (default) is what used to be the runner's skip rule: a task whose
+   upstream failed simply does not run, and the Jobs UI graph is the results table.
 2. **Unique global names** (§3.2). One namespace per run.
 3. **Dependencies arrive as arguments.** Every function that needs a model, a table or an index
-   takes it as its first parameter. That is what makes the same file work under `%run`, under
-   `import`, and inside the serving container.
-4. **Notebooks import each other with plain Python imports; `%run` is not used.** A notebook is a
-   plain `.py` file whose cell markers are comments, so every file stays importable, and a stage
-   notebook imports what it runs. `pipeline/package_agent` logs the model with the whole tree as code:
+   takes it as its first parameter — `check(ctx)`'s `ctx` is where a notebook's own `__main__` block
+   assembles them, from widgets and `setup/config.py`, before calling it.
+4. **Notebooks import each other with plain Python imports; `%run` is not used anywhere in this tree.**
+   A notebook is a plain `.py` file whose cell markers are comments, so every file stays importable,
+   including by another notebook of the tree. The three release actions of §17 —
+   `package` / `deploy` / `rollback` — are one more notebook that acts, `serving/endpoint.py`, chosen
+   by a widget instead of three separate files, because that logic has exactly one natural owner and
+   inventing a second file for it would be exactly the kind of indirection point 1 rules out:
+   ```python
+   # notebooks/serving/endpoint.py — COMMAND ----------
+   if __name__ == "__main__":
+       dbutils.widgets.text("profile", "free")
+       dbutils.widgets.dropdown("action", "deploy", ["package", "deploy", "rollback"])
+       ctx = build_ctx(dbutils.widgets.get("profile"))
+       {"package": package_agent, "deploy": deploy_agent, "rollback": rollback_agent}[dbutils.widgets.get("action")](ctx)
+   ```
+   `package_agent(ctx)` logs the model with the whole tree as code, from inside this same notebook:
    ```python
    mlflow.pyfunc.log_model(
        name="finhive_agent",
@@ -341,7 +397,9 @@ anything.
 
 Alternatives rejected: an importable agent package (contradicts `architecture.md` §0, no second
 home for agent code); dual-mode files that `%run` and re-import on `NameError` (unreadable);
-assembling the model source by string concatenation at deploy time (cannot be reviewed).
+assembling the model source by string concatenation at deploy time (cannot be reviewed); a
+`pipeline/` folder of stage notebooks that only import the tree and call its checks (the extra
+indirection this design now avoids — see §19).
 
 **Consequence for CI.** `check_notebook_layering.py`'s `%run` pass sees almost nothing inside
 these folders, so its checks become import-based: `setup/` may import
@@ -357,6 +415,14 @@ agent code receives its table reader and its index as **arguments**; where they 
 container, a widget, a job parameter) is `architecture.md`'s decision, and its §3, §3.1 and §4
 need updating to match.
 
+**A second departure, to reconcile the same way:** `architecture.md` §6.2 defines a job as a chain of
+purpose-built job notebooks (one per pipeline stage: ingest, build-index, …), each `%run`-composing the
+notebooks under it. The agent's job (§19) instead runs the tree notebooks themselves as tasks — there is
+no separate job-notebook layer for the agent at all, because point 1 above already gives every tree
+notebook a job-runnable `__main__` block. `architecture.md`'s job-notebook convention is unaffected for
+`data_ingestion` and `data_modeling`, which stay exactly as written there; this is narrower than a
+general rule change, and worth an ADR noting the agent tree as the one exception.
+
 ---
 
 ## 4. Model access (`llm/`)
@@ -369,24 +435,23 @@ learns what a gateway is.
 ### 4.1 The model names, and roles
 
 Everything goes through the **same AI Gateway base URL and the same client**; only the `model=`
-differs. There are four names, all variables in `setup/config.py`:
+differs. There are four names, all read in `setup/config.py`, **none with a literal default** (§3.1) —
+each is a secret key in the scope, delivered as an environment variable:
 
 ```python
-AI_GATEWAY_ROUTER_MODEL = os.getenv(
-    "FINHIVE_GATEWAY_ROUTER_MODEL", f"{UC_FULL_SCHEMA}.finhive_router"
-)
-AI_GATEWAY_EMBEDDINGS_MODEL = os.getenv(
-    "FINHIVE_GATEWAY_EMBEDDINGS_MODEL", f"{UC_FULL_SCHEMA}.finhive_embeddings"
-)
+AI_GATEWAY_ROUTER_MODEL     = os.getenv("FINHIVE_GATEWAY_ROUTER_MODEL")       # secret key: gateway-router-model
+AI_GATEWAY_EMBEDDINGS_MODEL = os.getenv("FINHIVE_GATEWAY_EMBEDDINGS_MODEL")   # secret key: gateway-embeddings-model
 # Guardrails do NOT use the two services above: they call the cheapest Databricks-hosted
 # pay-per-token endpoints (§11.3).
-GUARDRAIL_INPUT_MODEL = os.getenv(
-    "FINHIVE_GUARDRAIL_INPUT_MODEL", "databricks-meta-llama-3-1-8b-instruct"
-)
-GUARDRAIL_OUTPUT_MODEL = os.getenv(
-    "FINHIVE_GUARDRAIL_OUTPUT_MODEL", "databricks-gpt-oss-20b"
-)
+GUARDRAIL_INPUT_MODEL  = os.getenv("FINHIVE_GUARDRAIL_INPUT_MODEL")           # secret key: guardrail-input-model
+GUARDRAIL_OUTPUT_MODEL = os.getenv("FINHIVE_GUARDRAIL_OUTPUT_MODEL")          # secret key: guardrail-output-model
 ```
+
+The values shown elsewhere in this document (`system.ai.llama_v3_3_70b_instruct` /
+`system.ai.gpt-oss-120b` behind `finhive_router`, `databricks-meta-llama-3-1-8b-instruct`,
+`databricks-gpt-oss-20b`) are what `bootstrap_secrets.py` puts into the scope for the `free`
+environment today, not defaults baked into `gateway.py` — changing a model is a secret update, never a
+code change or a redeploy of `llm/gateway.py`.
 
 | Name | Purpose | Consumed by |
 |---|---|---|
@@ -396,11 +461,14 @@ GUARDRAIL_OUTPUT_MODEL = os.getenv(
 | `GUARDRAIL_OUTPUT_MODEL` | the cheapest pay-per-token endpoint that can compare figures against a long evidence base | the `guard_out` role |
 
 `gateway.py` is the only code that maps a role to one of these names, and **no model name is written
-anywhere except `setup/config.py`**. This relaxes v1's "one path to a model" rule, which allowed two
-gateway services: the path is still one (the gateway), the *names* are now four. The endpoint the news
-index embeds with is chosen where the index is built (`data_modeling`, `architecture.md`); agent code
-never names it. There is no fallback path if a model is down; the failure is visible (§1, invariant 3),
-and each guardrail already has a defined posture for it (§11).
+anywhere except as a secret value** — `setup/config.py` holds only the four environment-variable names
+that resolve to them (§3.1). This relaxes v1's "one path to a model" rule, which allowed two gateway
+services: the path is still one (the gateway), the *names* are now four, and none of the four is a
+literal in the repository. The endpoint the news index embeds with is chosen where the index is built
+(`data_modeling`, `architecture.md`); agent code never names it. There is no fallback path if a model is
+down; the failure is visible (§1, invariant 3), and each guardrail already has a defined posture for it
+(§11). A secret present but pointing at a retired model surfaces the same way every other bad secret
+does — as a named failure in `llm/gateway`'s `check` (§18), not a silent one at first request.
 
 `KNOWN_MODEL_ROLES = {"router", "worker", "synthesizer", "guard_in", "guard_out", "embedding"}`. There
 is no `critic` role (its only caller was the output guardrail, now `guard_out`) and no `judge` role:
@@ -480,7 +548,7 @@ rules for every schema are:
   because strict mode requires all keys.
 - **Field descriptions carry the meaning**, because the model reads them as part of the schema.
 - `check_schema_supported(schema)` scans `schema.model_json_schema()` for the forbidden keys and the key
-  limit. The `check` of each node that owns a schema calls it for that schema (§19.4), so a schema that drifts
+  limit. The `check` of each node that owns a schema calls it for that schema (§19.3), so a schema that drifts
   fails in the job, not on the first question.
 
 **The three schemas**
@@ -1239,8 +1307,8 @@ answer.
 
 ## 15. Observability
 
-`mlflow.set_experiment(...)` and `mlflow.langchain.autolog()` run once, in each stage notebook or
-in `model_entry.py`, before any graph call. Every invocation is then traced: nodes, tool calls
+`mlflow.set_experiment(...)` and `mlflow.langchain.autolog()` run once, in the `__main__` block of
+whichever notebook is making the calls (§3.3) or in `model_entry.py`, before any graph call. Every invocation is then traced: nodes, tool calls
 with inputs and outputs, model calls, token counts. The role label passed to `chat(...)` is
 what lets a trace answer "which part of the graph spent this".
 
@@ -1321,12 +1389,13 @@ eye in the run table.
 
 ---
 
-## 17. Serving — `model_entry`, `endpoint` and the release stages
+## 17. Serving — `model_entry`, `endpoint` and the release actions
 
 `architecture.md` §11: the graph runs only on Databricks, behind one Model Serving endpoint, and
-`apps/api` is a thin HTTP client of it. Two files in `serving/` and three stage notebooks make that
-real: `model_entry` defines what is served, `endpoint` holds what the deploy and rollback stages share,
-and `package_agent`, `deploy_agent` and `rollback_agent` (§19) do the deploying.
+`apps/api` is a thin HTTP client of it. Two files in `serving/` make that real, and only two: `model_entry`
+defines what is served, `endpoint` holds everything about releasing it — including the three release
+*actions* (`package` / `deploy` / `rollback`, §3.3, §19), each one a value of the same widget rather
+than a notebook of its own.
 
 **`notebooks/serving/model_entry.py`** — what MLflow logs (models-from-code):
 
@@ -1345,8 +1414,16 @@ class FinHiveAgent(ResponsesAgent):
 
 mlflow.models.set_model(FinHiveAgent())
 
-def check(ctx):                               # its smoke test, called by assemble_agent (§19)
+def check(ctx):                               # its smoke test, run directly as a job task (§18, §19)
     ...                                       # instantiate, load_context, one predict, check it serializes
+
+# COMMAND ----------
+if __name__ == "__main__":
+    dbutils.widgets.text("profile", "free")
+    result = check(build_ctx(dbutils.widgets.get("profile")))
+    print(result)
+    if not result.get("ok", False):
+        raise RuntimeError(f"{result}")
 ```
 
 Requirements the graph already satisfies and must keep satisfying:
@@ -1360,21 +1437,62 @@ Requirements the graph already satisfies and must keep satisfying:
   that is what makes `apps/api`'s auditable response shape possible, and it is a better demo
   than a chat box.
 
-**Where the deployment logic lives.** Only `model_entry` has to be a separate file, because it is the one
-that runs inside the serving container. Everything else runs only in a Databricks job, has a single caller,
-and is a few lines, so it sits **inside the stage notebook that runs it** rather than in a file of its own.
-The one exception is `serving/endpoint.py`, because `deploy_agent` and `rollback_agent` must do the same
-thing to the endpoint — the second toward the previous version.
+**Where the deployment logic lives.** `model_entry` has to be a separate file because it is the one that
+runs inside the serving container. Every other release step runs only in a Databricks job and never
+inside the container, so all of it lives in `serving/endpoint.py`, behind one `action` widget
+(§3.3) — not three near-empty notebooks whose only content would have been "import this and call it":
 
-| Where | What | Takes | Returns |
-|---|---|---|---|
-| `pipeline/package_agent` | logs the model — `log_model(python_model="notebooks/serving/model_entry.py", code_paths=["notebooks"], pip_requirements=…)` — then registers it in Unity Catalog under the name in `setup/config.py` | — | `model_uri`, `model_version` |
-| `serving/endpoint.py` | `champion_version()` and `mark_champion(version)` read and move the `champion` alias; `set_served_version(endpoint, version)` creates or updates the endpoint through the SDK (name, workload size, scale-to-zero as plain arguments, no separate YAML) and waits until it is ready | a version | `endpoint_name` |
-| `pipeline/deploy_agent` | reads the alias, `set_served_version(new)`, asks the **served** endpoint one ordinary question and one advice request (which must be refused), and only then `mark_champion(new)` | `model_version` | — |
-| `pipeline/rollback_agent` | `set_served_version(champion_version())`; a **no-op** when there is no alias or the endpoint is already on it | — | — |
+```python
+# notebooks/serving/endpoint.py
+def champion_version(ctx): ...              # read the alias
+def mark_champion(ctx, version): ...        # move the alias
+def set_served_version(ctx, version): ...   # create/update the endpoint via the SDK — name, workload
+                                             # size, scale-to-zero as plain arguments, no separate YAML;
+                                             # waits until ready; environment_vars set from the secret
+                                             # scope (§3.1) so the container needs no dbutils to see them
 
-Values pass between stages in `dbutils.jobs.taskValues`; the last known good version lives in Unity
-Catalog, not in a task.
+def package_agent(ctx):
+    # log_model(python_model="notebooks/serving/model_entry.py", code_paths=["notebooks"], pip_requirements=…)
+    # register in Unity Catalog under the name in setup/config.py
+    return model_uri, model_version
+
+def deploy_agent(ctx):
+    prior = champion_version(ctx)                       # read BEFORE touching the endpoint
+    new = ctx.model_version                              # from package_agent, via dbutils.jobs.taskValues
+    set_served_version(ctx, new)
+    smoke(ctx)                                            # one ordinary question, one advice request (must refuse)
+    mark_champion(ctx, new)                               # only after the smoke passes
+
+def rollback_agent(ctx):
+    prior = champion_version(ctx)
+    if prior is not None:
+        set_served_version(ctx, prior)                    # no-op if the endpoint is already on it
+
+# COMMAND ----------
+if __name__ == "__main__":
+    dbutils.widgets.text("profile", "free")
+    dbutils.widgets.dropdown("action", "deploy", ["package", "deploy", "rollback"])
+    ctx = build_ctx(dbutils.widgets.get("profile"))
+    {"package": package_agent, "deploy": deploy_agent, "rollback": rollback_agent}[dbutils.widgets.get("action")](ctx)
+```
+
+`champion_version` / `mark_champion` / `set_served_version` have no `check` of their own — they are
+exercised by whichever action calls them (§18) — but `package_agent`, `deploy_agent` and
+`rollback_agent` are each a real job task (§19), one per value of `action`, all pointed at this same
+notebook.
+
+**How the served copy sees its configuration.** The serving container has no `dbutils` and therefore no
+way to read the secret scope the way a job task does, so `set_served_version` declares every name of
+§3.1 as an endpoint **environment variable whose value is a secret reference** —
+`{{secrets/finhive-<profile>/<key>}}` — which Model Serving resolves at deploy time and hands the
+container as an ordinary environment variable. That is what makes the single `os.getenv(NAME)` line in
+`setup/config.py` work identically in a job and inside the endpoint, with the value living in exactly
+one place either way (§3.1). It also means a model name or a table name changes with a secret update
+plus a re-deploy of the endpoint — not with a code change — and that an unresolvable reference fails the
+new version at load, where the smoke step below catches it.
+
+Values pass between the three job tasks in `dbutils.jobs.taskValues` (`model_uri`, `model_version` out
+of `package`, read by `deploy`); the last known good version lives in Unity Catalog, not in a task.
 
 **The `champion` alias is the durable record of the last known good version.** `deploy_agent` reads it
 *before* updating the endpoint, updates the endpoint, smokes it, and moves the alias to the new version
@@ -1384,8 +1502,9 @@ on a value held by a failed task. On the very first deploy there is no alias, so
 restore to and stays visible.
 
 The smoke is a step after `set_served_version` because an endpoint that loads a model is not one that answers:
-`load_context` failures (a missing `code_path`, a `PanelData` read without the right grant) only appear
-when the new version is live. **The pins of `package_agent`'s `log_model` and those of the job environment must match**
+`load_context` failures (a missing `code_path`, a `PanelData` read without the right grant, an
+`environment_vars` secret reference that does not resolve) only appear when the new version is live.
+**The pins of `package_agent`'s `log_model` and those of the job environment must match**
 (§19.6): the serving container is another machine and the job environment does not follow the model into
 it.
 
@@ -1393,13 +1512,15 @@ it.
 
 ## 18. The agent notebooks to create
 
-Every notebook defines its functions and, except four, a `check` (§3.3). The stage notebooks of
-`pipeline/` run the checks; the last column says what each `check` does. All at zero model calls unless
-stated; the details are §19.4.
+Every notebook defines its functions and, except four, a `check` (§3.3). Each notebook with a `check`
+also carries the `__main__` block of §3.3 that runs it directly — that block is what the job (§19)
+points its tasks at, one task per row of the table below; nothing else runs a check on its behalf.
+The last column says what each `check` does. All at zero model calls unless stated; the details are
+§19.3.
 
 | Notebook | Definitions | `check` |
 |---|---|---|
-| `setup/config.py` | every name, path and role setting others read (§3.1) | every name resolves; secret *names* exist in the scope |
+| `setup/config.py` | every name, path and role setting others read (§3.1) | every `os.getenv` name is actually populated (none is `None`) and every key it maps to exists in the scope — a missing secret is named here, not discovered three calls later |
 | `llm/gateway.py` | `get_chat_model`: token cache, `extra_body`, 300-token floor, role → model | each role answers one prompt (6 calls) |
 | `llm/parsing.py` | `message_text`, `ask_structured`, `check_schema_supported` (§4.2) | the four content shapes; one structured round trip per routed model |
 | `tools/symbols.py` | `resolve_symbol`, the alias table, `UnknownSymbolError` | alias and prefix cases; an unknown symbol raises |
@@ -1420,9 +1541,7 @@ stated; the details are §19.4.
 | `graph/cache_node.py` | `cache_lookup`, `cache_store` | a miss continues, a hit ends, an outage is a miss |
 | `graph/build.py` | assembly and compile | three end-to-end questions (about 15–30 calls) |
 | `serving/model_entry.py` | the `ResponsesAgent` MLflow logs | instantiate, `load_context`, one `predict` (~10 calls) |
-| `serving/endpoint.py` | `set_served_version`, `champion_version`, `mark_champion` (§17) | *no check: exercised by the deploy stage* |
-| **`pipeline/runner.py`** | `run_stage`: run checks in dependency order, skip what a failure blocks, print the table | *no check* |
-| **`pipeline/{verify_foundations,verify_components,assemble_agent,package_agent,deploy_agent,rollback_agent}.py`** | — (they act) | the six stages of §19.4 |
+| `serving/endpoint.py` | `set_served_version`, `champion_version`, `mark_champion`, and the `package_agent` / `deploy_agent` / `rollback_agent` actions behind the `action` widget (§17) | *no check on the helpers: exercised by whichever action runs*; the three actions are themselves the three release tasks of §19.3, not smoke tests |
 | **`evaluation/build_golden_set.py`** | the curated cases (§16.1) | acts too: registers the MLflow evaluation dataset |
 | `docs/notebooks/agent_walkthrough.py` | exploratory: one question, printing plan → cards → consensus → answer, with the trace link | never scheduled, never deployed (`architecture.md` §3) |
 
@@ -1435,47 +1554,113 @@ outright — it called `build_graph(frame)` with an M1-era DataFrame while the g
 
 ## 19. Orchestration of the agent
 
-This section orchestrates **the notebooks of the tree in §3**: how a job connects them into one process
-that builds, verifies, packages and deploys the agent, and how one question then travels through them.
+This section orchestrates **the notebooks of the tree in §3**: how one job runs them — a task per
+notebook — to verify, package and deploy the agent, and how one question then travels through them.
 It says nothing about how data is produced; what the agent needs from the data platform is a contract
 (§19.2).
 
-### 19.1 The idea: two levels
+### 19.1 The idea: one level, not two
 
-- **The job connects six stage notebooks** in `pipeline/` (and runs `evaluation/build_golden_set` beside them). It adds no logic of its own.
-- **Each stage runs the notebooks of the tree**: it imports them and calls their `check` (or their
-  deployment function) in dependency order. The tree notebooks only define; the stages are the only
-  notebooks that act.
-- **A stage reports per notebook.** `pipeline/runner.py` runs a stage's checks in dependency order,
-  catches an exception as a red row, **skips a check whose prerequisite is red** ("skipped: needs
-  `llm/gateway`"), never stops at the first failure, and prints one table with a row per tree notebook
-  — status, seconds, detail. The stage then fails if any row is red. The red row is the red notebook.
-- **Stages share confidence, not code.** Each stage is a separate process. What travels between them is
-  only *success* and a few small values in `dbutils.jobs.taskValues`; the last known good model version
-  lives in Unity Catalog (§17).
-- **The tail is the release**: assemble the graph, log and register it, deploy it, prove the served
-  endpoint answers, and undo it if it does not.
+There used to be a `pipeline/` folder of stage notebooks standing between the job and the tree, each
+one importing a handful of tree notebooks and calling their `check`. It added a second copy of the
+dependency graph (the stage's internal order) on top of the one the tree already has (§3), and a second
+file for every notebook that already knew how to run itself once it had an `if __name__ == "__main__":`
+block (§3.3). Both are gone:
+
+- **The job connects the notebooks of the tree directly.** Every task's `notebook_path` is a real file
+  under `notebooks/` — `setup/config`, `llm/gateway`, `tools/panel_data`, …, with the three release
+  tasks all pointing at `serving/endpoint` under a different `action` (§17). There is no notebook in the
+  job whose only job is to call another notebook.
+- **The dependency graph is the job's own DAG.** The order the tree notebooks must run in — `config`
+  before `llm/gateway`, `panel_data` and `symbols` before a domain tools file, every tools file before
+  its expert, and so on — is exactly what `depends_on` between tasks expresses. It is drawn once, in
+  §19.3, and it is the same graph that used to be redrawn *inside* each stage in the old design.
+- **Databricks reports per task, natively.** A task's `notebook_path` points straight at the failing
+  notebook, so the Jobs UI graph already is the "one row per notebook, status, red row" table the old
+  runner used to print by hand. `run_if: ALL_SUCCESS` (the default) is the skip rule: a task whose
+  upstream failed simply never runs, and *Repair run* reruns only what is downstream of a failure.
+- **Tasks share confidence, not code.** What travels between them is only *success* (via `depends_on`)
+  and a few small values in `dbutils.jobs.taskValues` (`model_uri`, `model_version` out of `package`,
+  read by `deploy`); the last known good model version lives in Unity Catalog (§17), not in a task.
+- **The tail is the release**: `build` and `model_entry` prove the assembled graph and the served class,
+  then `package` logs and registers it, `deploy` ships and smokes it, and `rollback` undoes it if the
+  deploy failed.
+
+**What this costs, stated plainly.** Roughly two dozen tasks instead of six means roughly two dozen
+serverless environment startups per run instead of six, each paying its own cold start and re-importing
+the tree, where a stage used to amortise that over all the checks it ran in one process. The run gets
+slower and slightly more expensive in exchange for a red task that *is* the red notebook, a
+`Repair run` scoped to one notebook, and one fewer file per notebook to keep in sync. Independent
+tasks do run in parallel — the four domain tools files, the five experts and the two guardrails have no
+edges between them — so wall-clock cost is far below the sum. If the startup overhead turns out to
+dominate (measure it on the first full run, §22), the cheapest fix is to collapse only the leaf
+fan-outs that share a dependency set, never to reintroduce a stage layer.
 
 ### 19.2 What the agent requires before it is built
 
-Inputs, not tasks. Each is checked by the notebook named, and a missing one turns its row red:
+Inputs, not tasks. Each is checked by the notebook named, and a missing one turns that notebook's task
+red:
 
 | Input | Used by | Checked by |
 |---|---|---|
-| The gold tables `PanelData` loads: technical indicators, risk, correlations, fundamentals, macro (names in `setup/config.py`) | `tools/panel_data` | its `check` — they exist and are fresh |
+| The gold tables `PanelData` loads: technical indicators, risk, correlations, fundamentals, macro (their names are secrets, §3.1) | `tools/panel_data` | its `check` — they exist and are fresh |
 | The news index (§13.1) | `tools/news_tools` | its `check` — a filtered query answers |
 | The four model names (§4.1) | `llm/gateway` | `llm/gateway` and `llm/parsing` — each role answers, each schema validates |
-| The secrets named in the configuration | the gateway token, the cache connection | `setup/config` |
+| **Every key of `REQUIRED_KEYS` present in the scope, and injected as an environment variable** — not only the credentials but every name of §3.1, since none has a default any more | everything; a missing one leaves an `os.getenv` at `None` | `setup/config` — the first task of the job, and the reason it is first |
 | The Valkey service, only if the cache is on | `cache/` | `cache/valkey` |
 
-### 19.3 The job
+### 19.3 The job — one task per tree notebook
 
 ```mermaid
-flowchart LR
-    VF["verify_foundations"] --> VC["verify_components"] --> AS["assemble_agent"] --> GP{"publish?"}
-    GP -->|true| PK["package_agent"]
-    PK -->|"model_uri, model_version"| DP["deploy_agent"]
-    DP -.->|"failed"| RB["rollback_agent"]
+flowchart TD
+    CFG["config"] --> GW["llm/gateway"] --> PA["llm/parsing"]
+    CFG --> PD["panel_data"]
+    CFG --> SY["symbols"]
+    CFG --> TN["news_tools"]
+    CFG --> VK["cache/valkey"] --> SC["semantic_cache"]
+    GW --> SC
+    PD --> TT["technical_tools"]
+    PD --> TR["risk_tools"]
+    PD --> TF["fundamental_tools"]
+    PD --> TM["macro_tools"]
+    SY --> TT
+    SY --> TR
+    SY --> TF
+    SY --> TM
+    OP["opinion"] --> SN["synthesizer"]
+    PA --> IG["input_guardrail"]
+    PA --> OG["output_guardrail"]
+    PA --> PL["planner"]
+    PD --> PL
+    SY --> PL
+    GW --> SN
+    GW --> AT["technical_analyst"]
+    GW --> AR["quant_risk_analyst"]
+    GW --> AF["fundamental_analyst"]
+    GW --> AM["macro_analyst"]
+    GW --> AN["news_analyst"]
+    TT --> AT
+    TR --> AR
+    TF --> AF
+    TM --> AM
+    TN --> AN
+    SC --> CN["cache_node"]
+    OP --> GB["graph/build"]
+    IG --> GB
+    OG --> GB
+    PL --> GB
+    AT --> GB
+    AR --> GB
+    AF --> GB
+    AM --> GB
+    AN --> GB
+    CN --> GB
+    SN --> GB
+    GB --> ME["serving/model_entry"]
+    ME --> GP{"publish?"}
+    GP -->|true| PK["package"]
+    PK -->|"model_uri, model_version"| DP["deploy"]
+    DP -.->|"failed"| RB["rollback"]
     GS["evaluation/build_golden_set"]
     classDef side fill:#1B3139,stroke:#FF3621,color:#ffffff;
     classDef undo fill:#5a1f1f,stroke:#FF3621,color:#ffffff;
@@ -1483,128 +1668,67 @@ flowchart LR
     class RB undo;
 ```
 
-| Task | Notebook | Depends on | Runs when | Leaves | Timeout | Retries |
-|---|---|---|---|---|---|---|
-| `verify_foundations` | `pipeline/verify_foundations` | — | always | the results table | 1200 | 0 |
-| `verify_components` | `pipeline/verify_components` | verify_foundations | always | the results table | 2400 | 0 |
-| `assemble_agent` | `pipeline/assemble_agent` | verify_components | always | the results table | 2400 | 0 |
-| `gate_publish` | *condition* | assemble_agent | — | — | — | — |
-| `package_agent` | `pipeline/package_agent` | gate_publish (true) | `publish=true` | `model_uri`, `model_version` | 900 | 0 |
-| `deploy_agent` | `pipeline/deploy_agent` | package_agent | after packaging | `endpoint_name` | 2400 | 0 |
-| `rollback_agent` | `pipeline/rollback_agent` | deploy_agent | **`run_if: AT_LEAST_ONE_FAILED`** | — | 1200 | 0 |
-| `build_golden_set` | `evaluation/build_golden_set` | — | always; nothing depends on it | the MLflow dataset | 600 | 0 |
+Every box is a task whose `notebook_path` is that tree notebook, run through its own `__main__` block
+(§3.3); the three release boxes are all `serving/endpoint`, with `action=package|deploy|rollback`
+(§17). `depends_on` matches the arrows above exactly — a later task may rely on everything upstream of
+it having already passed, the same guarantee the old stage boundaries gave, expressed as the job's own
+DAG instead of a second graph inside a stage notebook.
 
-A run is a chain of five, with `rollback_agent` waiting in the wings and `build_golden_set` refreshing the
-evaluation dataset beside it, out of the release path.
+| Task | Notebook (`{nb}` = `.../notebooks`) | Depends on | What it checks | Model calls | Timeout |
+|---|---|---|---|---|---|
+| `config` | `setup/config` | — | the profile resolves; every §3.1 `os.getenv` name resolved to a value (none is `None`); every key it maps to exists in the scope — the value itself is never printed | 0 | 300 |
+| `gateway` | `llm/gateway` | config | each role answers one prompt; the embedding role returns a vector; the token floor is applied | 6 | 300 |
+| `parsing` | `llm/parsing` | gateway | `message_text` on a string, a block list, a dict and `None`; one structured round trip per routed model | ~4 | 300 |
+| `panel_data` | `tools/panel_data` | config | every gold table exists and is fresh; `PanelData` loads; `describe(data)` prints | 0 | 300 |
+| `symbols` | `tools/symbols` | config | aliases and prefixes resolve; an unknown symbol raises; nothing near-matches | 0 | 180 |
+| `technical_tools`, `risk_tools`, `fundamental_tools`, `macro_tools` | `tools/{…}_tools` | panel_data, symbols | each tool called once on a fixed symbol; an "as of" date and no `ERROR` | 0 | 180 each |
+| `news_tools` | `tools/news_tools` | config | a filtered query returns only that ticker; an unanswerable one returns nothing; MMR returns at most 6 | 0 | 300 |
+| `valkey` | `cache/valkey` | config | a probe key round-trips within the timeout; **skipped (pass) when `enable_cache=false`** | 0 | 180 |
+| `semantic_cache` | `cache/semantic_cache` | valkey, gateway | identical question hits; another instrument misses; an expired entry misses | embeddings | 300 |
+| `opinion` | `graph/opinion` | — | fixture cards: evidence rebuilt from tool messages, a malformed judgement becomes a degraded card, consensus labels | 0 | 180 |
+| `input_guardrail` | `guardrails/input_guardrail` | parsing | `check_schema_supported(InputVerdict)`; a research question allowed, an advice request refused | 2 | 300 |
+| `output_guardrail` | `guardrails/output_guardrail` | parsing | the schema; a grounded draft passes, a draft with an invented figure fails with `unsupported` filled | 2 | 300 |
+| `planner` | `graph/planner` | parsing, panel_data, symbols | the schema; crypto convenes no fundamental analyst, a macro question only the macro one, a broad equity question several | 3 | 300 |
+| `synthesizer` | `graph/synthesizer` | gateway, opinion | fixture cards give an answer; an empty reply gives `fallback_answer` | 1 | 300 |
+| `technical_analyst`, `quant_risk_analyst`, `fundamental_analyst`, `macro_analyst`, `news_analyst` | `agents/{…}` | gateway, its tools task | one canned question: at least one tool call and a well-formed judgement | 1 run each | 300 each |
+| `cache_node` | `graph/cache_node` | semantic_cache | a miss continues; a hit ends the run; an outage is a miss; **skipped (pass) when `enable_cache=false`** | 0–1 | 300 |
+| `build` | `graph/build` | opinion, input_guardrail, output_guardrail, planner, synthesizer, all five experts, cache_node | compiles; an ordinary question, an advice request (refused) and a crypto question run end to end; the blocked flag, cards, consensus, disclaimer and `messages[-1]` are right | ~15–30 | 2400 |
+| `model_entry` | `serving/model_entry` | build | instantiates `FinHiveAgent`, `load_context`, one `predict`; the response serializes to JSON | ~10 | 900 |
+| `gate_publish` | *condition* | model_entry | — | — | — |
+| `package` | `serving/endpoint` (`action=package`) | gate_publish (true) | logs the model, registers a version in Unity Catalog | 0 | 900 |
+| `deploy` | `serving/endpoint` (`action=deploy`) | package | reads the `champion` alias, updates the endpoint and waits until ready; the served endpoint answers an ordinary question and refuses an advice request; **only then** moves `champion` to the new version | ~10 | 2400 |
+| `rollback` | `serving/endpoint` (`action=rollback`) | deploy, **`run_if: AT_LEAST_ONE_FAILED`** | repoints the endpoint at the `champion` version; a no-op when there is none | 0 | 1200 |
+| `build_golden_set` | `evaluation/build_golden_set` | — (always; nothing depends on it) | writes the curated cases, registers the MLflow evaluation dataset | 0 | 600 |
 
-### 19.4 What each stage runs
-
-Inside a stage the checks run one after another, in the order below; the dependency column is what makes
-the runner skip a check when something it needs is red. A later stage may rely on everything an earlier
-one proved.
-
-| Stage | Check (notebook) | Needs | What it checks | Model calls |
-|---|---|---|---|---|
-| **verify_foundations** | `setup/config` | — | the profile resolves; every §3.1 name is present; every secret *name* exists in the scope (never a value) | 0 |
-| | `llm/gateway` | config | each role answers one prompt; the embedding role returns a vector; the token floor is applied | 6 |
-| | `llm/parsing` | gateway | `message_text` on a string, a block list, a dict and `None`; one structured round trip per routed model | ~4 |
-| | `tools/panel_data` | config | every gold table exists and is fresh; `PanelData` loads; `describe(data)` prints | 0 |
-| | `tools/symbols` | config | aliases and prefixes resolve; an unknown symbol raises; nothing near-matches | 0 |
-| | `tools/technical_tools`, `risk_tools`, `fundamental_tools`, `macro_tools` | panel_data, symbols | each tool called once on a fixed symbol; an "as of" date and no `ERROR` | 0 |
-| | `tools/news_tools` | config | a filtered query returns only that ticker; an unanswerable one returns nothing; MMR returns at most 6 | 0 |
-| | `cache/valkey` | config | a probe key round-trips within the timeout; **skipped when `enable_cache=false`** | 0 |
-| | `cache/semantic_cache` | valkey, gateway | identical question hits; another instrument misses; an expired entry misses | embeddings |
-| **verify_components** | `graph/opinion` | — | fixture cards: evidence rebuilt from tool messages, a malformed judgement becomes a degraded card, consensus labels | 0 |
-| | `guardrails/input_guardrail` | parsing | `check_schema_supported(InputVerdict)`; a research question allowed, an advice request refused | 2 |
-| | `guardrails/output_guardrail` | parsing | the schema; a grounded draft passes, a draft with an invented figure fails with `unsupported` filled | 2 |
-| | `graph/planner` | parsing, panel_data, symbols | the schema; crypto convenes no fundamental analyst, a macro question only the macro one, a broad equity question several | 3 |
-| | `graph/synthesizer` | gateway, opinion | fixture cards give an answer; an empty reply gives `fallback_answer` | 1 |
-| | `agents/<expert>` (×5) | gateway, its tools | one canned question: at least one tool call and a well-formed judgement | 1 run each |
-| | `graph/cache_node` | semantic_cache | a miss continues; a hit ends the run; an outage is a miss; **skipped when `enable_cache=false`** | 0–1 |
-| **assemble_agent** | `graph/build` | every check of verify_components | compiles; an ordinary question, an advice request (refused) and a crypto question run end to end; the blocked flag, cards, consensus, disclaimer and `messages[-1]` are right | ~15–30 |
-| | `serving/model_entry` | build | instantiates `FinHiveAgent`, `load_context`, one `predict`; the response serializes to JSON | ~10 |
-| **package_agent** | *(acts itself)* | — | logs the model, registers a version in Unity Catalog | 0 |
-| **deploy_agent** | `serving/endpoint` | — | reads the `champion` alias, updates the endpoint and waits until ready; the served endpoint answers an ordinary question and refuses an advice request; **only then** moves `champion` to the new version | ~10 |
-| **rollback_agent** | `serving/endpoint` | — | repoints the endpoint at the `champion` version; a no-op when there is none | 0 |
-
-The dependencies inside the two verifying stages, and the order the runner follows:
-
-```mermaid
-flowchart TD
-    subgraph VF["verify_foundations"]
-        CFG["config"] --> GW["llm/gateway"] --> PA["llm/parsing"]
-        CFG --> PD["panel_data"]
-        CFG --> SY["symbols"]
-        CFG --> TN["news_tools"]
-        CFG --> VK["cache/valkey"] --> SC["semantic_cache"]
-        GW --> SC
-        PD --> TT["technical_tools"]
-        PD --> TR["risk_tools"]
-        PD --> TF["fundamental_tools"]
-        PD --> TM["macro_tools"]
-        SY --> TT
-        SY --> TR
-        SY --> TF
-        SY --> TM
-    end
-    subgraph VC["verify_components"]
-        OP["opinion"] --> SN["synthesizer"]
-        IG["input_guardrail"]
-        OG["output_guardrail"]
-        PL["planner"]
-        AT["technical_analyst"]
-        AR["quant_risk_analyst"]
-        AF["fundamental_analyst"]
-        AM["macro_analyst"]
-        AN["news_analyst"]
-        CN["cache_node"]
-    end
-    subgraph AS["assemble_agent"]
-        GB["graph/build"] --> ME["serving/model_entry"]
-    end
-    PA --> IG
-    PA --> OG
-    PA --> PL
-    PD --> PL
-    SY --> PL
-    GW --> SN
-    GW --> AT
-    GW --> AR
-    GW --> AF
-    GW --> AM
-    GW --> AN
-    TT --> AT
-    TR --> AR
-    TF --> AF
-    TM --> AM
-    TN --> AN
-    SC --> CN
-    VC --> GB
-```
+Timeouts are first guesses, one per task now instead of one per stage — each is close to what the old
+stage-level timeout allotted to that single check, since a task no longer shares its budget with
+neighbours it used to run alongside in the same stage.
 
 ### 19.5 Conditions, parameters, retries
 
 | Mechanism | Where | Effect |
 |---|---|---|
-| **Dependency edges**, `run_if: ALL_SUCCESS` (the default) | between tasks | a stage starts only when the previous one succeeded; a failed stage stops the chain |
-| **Skip rule** | inside a stage, by `pipeline/runner.py` | a check whose prerequisite is red or skipped is skipped, and the table says which prerequisite; the stage still runs every check it can, so one run reports everything that is broken |
-| **Condition task** `publish` | between `assemble_agent` and `package_agent` | with `publish=false` the release stages are skipped and the job ends after the checks |
-| **`run_if: AT_LEAST_ONE_FAILED`** | `rollback_agent`, depending on `deploy_agent` | it runs only when the deploy failed; if `package_agent` failed instead, `deploy_agent` never ran, the `champion` alias is untouched and the rollback is a no-op |
-| **Optional branch by parameter** | `cache/valkey`, `cache/semantic_cache`, `graph/cache_node` | with `enable_cache=false` their `check` returns "cache disabled" as a pass. The cache is optional, and a pass is more robust than skipping: `graph/build` needs no special handling |
+| **Dependency edges**, `run_if: ALL_SUCCESS` (the default) | between every pair of tasks in §19.3's graph | a task starts only when every task it `depends_on` succeeded; a failed task stops everything downstream of it, and nothing else — a sibling with no dependency on it keeps running. This *is* the old runner's skip rule, native to the Jobs scheduler instead of hand-rolled in `pipeline/runner.py` |
+| **Condition task** `gate_publish` | between `model_entry` and `package` | with `publish=false` the release tasks are skipped and the job ends after `model_entry` |
+| **`run_if: AT_LEAST_ONE_FAILED`** | `rollback`, depending on `deploy` | it runs only when `deploy` failed; if `package` failed instead, `deploy` never ran, the `champion` alias is untouched and the rollback is a no-op |
+| **Optional branch by parameter** | `valkey`, `semantic_cache`, `cache_node` | with `enable_cache=false` their `check` returns "cache disabled" as a pass. The cache is optional, and a pass is more robust than skipping: `build` needs no special handling |
 | **Retries** | every task `max_retries: 0` | a retry on a stochastic, paid check hides flakiness; flakiness is a finding |
-| **Timeouts** | per task, table of §19.3 | first guesses; a stage takes the **sum** of its checks, since they run in sequence, so adjust after the first run |
+| **Timeouts** | per task, table of §19.3 | first guesses, now scoped to one notebook instead of a whole stage — adjust after the first run |
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `profile` | `free` | passed to every stage; resolves the configuration (`architecture.md` §5.1) |
-| `publish` | `true` | `false` stops after `assemble_agent`: nothing is logged, registered or served |
-| `enable_cache` | `false` | passed to the two verifying stages, which hand it to the cache checks; leave it off until the three checks of §14.1 pass |
+| `profile` | `free` | passed to every task; resolves the configuration (`architecture.md` §5.1) |
+| `publish` | `true` | `false` stops after `model_entry`: nothing is logged, registered or served |
+| `enable_cache` | `false` | passed to `valkey`, `semantic_cache` and `cache_node`; leave it off until the three checks of §14.1 pass |
 
 ### 19.6 The job — `finhive_deploy_agent`
 
 Defined like every other job of `architecture.md` §6.2 and triggered by CI on every merge to `main`.
 `{nb}` stands for `/Workspace/Shared/finhive-2026/notebooks`, resolved by the same script that resolves
-`{profile}`.
+`{profile}`. Every task below has the same shape — `notebook_path` into the tree, `base_parameters`
+carrying `profile` (and `enable_cache` where the row of §19.3 needs it), `environment_key: agent`,
+`max_retries: 0` — so only a representative slice is spelled out in full; the rest follow the task table
+of §19.3 one for one, `task_key` = the first column, `depends_on` = the second.
 
 ```yaml
 # deploy/databricks/jobs/deploy_agent.yaml
@@ -1620,60 +1744,65 @@ parameters:
   - { name: enable_cache, default: "false" }
 
 tasks:
-  - task_key: verify_foundations
+  - task_key: config
     notebook_task:
-      notebook_path: "{nb}/pipeline/verify_foundations"
-      base_parameters: { profile: "{{job.parameters.profile}}", enable_cache: "{{job.parameters.enable_cache}}" }
+      notebook_path: "{nb}/setup/config"
+      base_parameters: { profile: "{{job.parameters.profile}}" }
     environment_key: agent
     max_retries: 0
-    timeout_seconds: 1200
+    timeout_seconds: 300
 
-  - task_key: verify_components
-    depends_on: [{ task_key: verify_foundations }]
+  - task_key: gateway
+    depends_on: [{ task_key: config }]
     notebook_task:
-      notebook_path: "{nb}/pipeline/verify_components"
-      base_parameters: { profile: "{{job.parameters.profile}}", enable_cache: "{{job.parameters.enable_cache}}" }
+      notebook_path: "{nb}/llm/gateway"
+      base_parameters: { profile: "{{job.parameters.profile}}" }
     environment_key: agent
     max_retries: 0
-    timeout_seconds: 2400
+    timeout_seconds: 300
 
-  - task_key: assemble_agent
-    depends_on: [{ task_key: verify_components }]
+  - task_key: panel_data
+    depends_on: [{ task_key: config }]
     notebook_task:
-      notebook_path: "{nb}/pipeline/assemble_agent"
-      base_parameters: { profile: "{{job.parameters.profile}}", enable_cache: "{{job.parameters.enable_cache}}" }
+      notebook_path: "{nb}/tools/panel_data"
+      base_parameters: { profile: "{{job.parameters.profile}}" }
     environment_key: agent
     max_retries: 0
-    timeout_seconds: 2400
+    timeout_seconds: 300
+
+  # … one task per remaining row of §19.3's table, same shape, `depends_on` from its "Depends on" column —
+  # symbols, technical_tools, risk_tools, fundamental_tools, macro_tools, news_tools, valkey, semantic_cache
+  # (+ enable_cache), opinion, input_guardrail, output_guardrail, planner, synthesizer, the five
+  # agents/<expert> tasks, cache_node (+ enable_cache), build, model_entry
 
   - task_key: gate_publish
-    depends_on: [{ task_key: assemble_agent }]
+    depends_on: [{ task_key: model_entry }]
     condition_task: { op: EQUAL_TO, left: "{{job.parameters.publish}}", right: "true" }
 
-  - task_key: package_agent
+  - task_key: package
     depends_on: [{ task_key: gate_publish, outcome: "true" }]
     notebook_task:
-      notebook_path: "{nb}/pipeline/package_agent"
-      base_parameters: { profile: "{{job.parameters.profile}}" }
+      notebook_path: "{nb}/serving/endpoint"
+      base_parameters: { profile: "{{job.parameters.profile}}", action: "package" }
     environment_key: agent
     max_retries: 0
     timeout_seconds: 900
 
-  - task_key: deploy_agent
-    depends_on: [{ task_key: package_agent }]
+  - task_key: deploy
+    depends_on: [{ task_key: package }]
     notebook_task:
-      notebook_path: "{nb}/pipeline/deploy_agent"
-      base_parameters: { profile: "{{job.parameters.profile}}" }
+      notebook_path: "{nb}/serving/endpoint"
+      base_parameters: { profile: "{{job.parameters.profile}}", action: "deploy" }
     environment_key: agent
     max_retries: 0
     timeout_seconds: 2400
 
-  - task_key: rollback_agent
-    depends_on: [{ task_key: deploy_agent }]
+  - task_key: rollback
+    depends_on: [{ task_key: deploy }]
     run_if: AT_LEAST_ONE_FAILED
     notebook_task:
-      notebook_path: "{nb}/pipeline/rollback_agent"
-      base_parameters: { profile: "{{job.parameters.profile}}" }
+      notebook_path: "{nb}/serving/endpoint"
+      base_parameters: { profile: "{{job.parameters.profile}}", action: "rollback" }
     environment_key: agent
     max_retries: 0
     timeout_seconds: 1200
@@ -1703,16 +1832,27 @@ environments:
         - databricks-vectorsearch==0.75      # search_news queries the index
         - valkey==<pin exactly>              # pure-Python client; only once the cache is built (§14.1)
         - mlflow==3.16.0
+      environment_variables:                 # every os.getenv(NAME) of §3.1 lands here, none hardcoded —
+                                              # verify the exact field name against the current Jobs API
+                                              # for serverless task environments (§22)
+        FINHIVE_GATEWAY_ROUTER_MODEL:     "{{secrets/finhive-{profile}/gateway-router-model}}"
+        FINHIVE_GATEWAY_EMBEDDINGS_MODEL: "{{secrets/finhive-{profile}/gateway-embeddings-model}}"
+        FINHIVE_GUARDRAIL_INPUT_MODEL:    "{{secrets/finhive-{profile}/guardrail-input-model}}"
+        FINHIVE_GUARDRAIL_OUTPUT_MODEL:   "{{secrets/finhive-{profile}/guardrail-output-model}}"
+        # ... one entry per name in setup/config.py — table names, index names, the MLflow experiment
+        # path, the registered-model name — the full list is REQUIRED_KEYS in bootstrap_secrets.py
+        # (architecture.md §5.2), not repeated here
 ```
 
 | Rule | Why |
 |---|---|
-| **A stage with a red row fails the task** | print the table, then `raise`. A red check that produces a green run is worse than no check |
-| **`max_retries: 0` everywhere** | a retry on a stochastic paid stage doubles the bill and hides flakiness |
+| **A task that fails, fails the job at that point** | its `notebook_path` names the red notebook directly; nothing downstream of it runs (§19.1) |
+| **`max_retries: 0` everywhere** | a retry on a stochastic paid check doubles the bill and hides flakiness |
 | **`publish=false` is a first-class mode** | "does every notebook work and does the graph answer" and "ship it" are different questions |
 | **`max_concurrent_runs: 1`** | two runs would race the same endpoint update |
 | **Exact pins, third-party only** | an unpinned `>=` produced `ResolutionTooDeep` before any code ran; notebook code is imported, never installed |
-| **The pins in `package_agent`'s `pip_requirements` equal the environment above** | the serving container is another machine; the job environment does not follow the model into it |
+| **The pins in `package`'s `log_model(pip_requirements=…)` equal the environment above** | the serving container is another machine; the job environment does not follow the model into it |
+| **No literal secret value, and no fallback default, anywhere in this file or in `setup/config.py`** (§3.1) | a value that only ever needs changing in the secret scope needs no redeploy of code; a job or endpoint that cannot resolve a secret-backed env var fails at startup with a named variable, not with a wrong value silently in use |
 
 ### 19.7 A run from the outside, and when it fails
 
@@ -1727,20 +1867,22 @@ flowchart LR
         RN --> SY["sync_shared_repo.py"]
     end
     M --> U
-    RN -.->|"fire-and-forget"| J["Job finhive_deploy_agent<br/>six stages"]
+    RN -.->|"fire-and-forget"| J["Job finhive_deploy_agent<br/>one task per tree notebook"]
     J --> EP[("Model Serving endpoint")]
     EP --> API["apps/api on AKS"]
     classDef manual fill:#1B3139,stroke:#FF3621,color:#ffffff;
     class EV manual;
 ```
 
-- **Read a failure in the stage's table**: the Jobs UI shows which stage is red, and its output shows which
-  tree notebook. Everything the table marks green was proven; the skipped rows say what blocked them.
-- **Repair, do not restart.** *Repair run* reruns only the failed stage and what depends on it.
-- **What a failure leaves.** Before `deploy_agent` nothing is registered or served. A failure inside
-  `deploy_agent` — the update, the wait, the smoke, or a timeout — leaves the `champion` alias on the
-  version that worked, and `rollback_agent` repoints the endpoint at it, so the previous version serves
-  again and the job ends red.
+- **Read a failure in the Jobs UI graph**: the red task *is* the red notebook — its `notebook_path`
+  names the file, and its output holds that notebook's own `check` result. Every green task was proven;
+  every task left unrun is, by construction, downstream of the red one.
+- **Repair, do not restart.** *Repair run* reruns only the failed task and what depends on it — which is
+  now per notebook rather than per stage, so a flaky expert check costs one rerun, not a whole stage's.
+- **What a failure leaves.** Before the `deploy` task nothing is registered or served. A failure inside
+  `deploy` — the update, the wait, the smoke, or a timeout — leaves the `champion` alias on the
+  version that worked, and the `rollback` task repoints the endpoint at it, so the previous version
+  serves again and the job ends red.
 - Every run creates a new model version, so a rerun is harmless.
 
 ### 19.8 One question, through the tree
@@ -1804,7 +1946,7 @@ Each step ends with something runnable and a gate. Do not start the next until i
 | **A4** | `agents/`, `graph/` (all of it), the panel cases of the golden set | in MLflow: the right experts convened, no degraded card, every answer grounded, none needs all 3 drafts |
 | **A5** | `tools/news_tools.py` (search + MMR), the news cases of the golden set (needs the `gold_news` index built in `data_modeling`) | the ticker filter returns only that ticker; unanswerable news cases return nothing |
 | **A6** | `agents/news_analyst.py`, the news routing rule in the planner prompt (requires the index of §13.1 to exist first) | a news question answers with dated, attributed headlines; a symbol with no articles in the window returns `insufficient_data`; an instruction planted in an article is ignored |
-| **A7** | `serving/*`, `pipeline/*`, `deploy/databricks/jobs/deploy_agent.yaml` | a green `finhive_deploy_agent` run; the served answer matches the in-process one; `predict_stream` yields increments |
+| **A7** | `serving/*` (both files, including the three `action` branches), the `__main__` block of every notebook that has a `check`, `deploy/databricks/jobs/deploy_agent.yaml` | a green `finhive_deploy_agent` run; the served answer matches the in-process one; `predict_stream` yields increments |
 | **A8** | the golden set grows to ~40 questions; judges created in MLflow and written down in the runbook | first full run recorded; thresholds fixed from it |
 | **A9** | `cache/`, `graph/cache_node.py` (after the three checks of §14.1), then the adaptive router | each ships only if measured to help on a fixed question set |
 | **A10** | Lakebase memory (checkpointer) | a follow-up question resolves a pronoun to the previous instrument |
@@ -1827,6 +1969,7 @@ Each step ends with something runnable and a gate. Do not start the next until i
 | A whole panel lost to one expert's exception | no per-expert isolation | `failed_card`, never a raised exception |
 | `ResolutionTooDeep` before any code ran | `>=` specifiers in a job environment | pin every dependency with `==`, in the job *and* in `log_model` |
 | An API key leaked into a job log | raw `requests` errors echo the URL | never log exception text that can contain a query-string secret |
+| A retired model name kept answering from a stale `os.getenv` default while the scope held the new one | the default *was* the value whenever the variable was unset | no `os.getenv` in `setup/config.py` takes a second argument; the scope is the only source, and an unset variable is a named failure in `config`'s `check` (§3.1) |
 
 ---
 
@@ -1848,8 +1991,10 @@ Each step ends with something runnable and a gate. Do not start the next until i
 7. `databricks-vectorsearch` is deprecated in favour of `databricks-ai-search`.
 8. **The `%run` vs import boundary (§3.3) is a decision, not a fact** — it is the one place
    this design overrides the composition mechanism `architecture.md` prescribes, because
-   Model Serving cannot execute a notebook magic. If it is rejected, the fallback is an
-   importable agent package, which contradicts `architecture.md` §0. Worth an ADR either way.
+   Model Serving cannot execute a notebook magic. `%run` stays the mechanism everywhere else on the
+   platform (`data_ingestion`, `data_modeling`); the agent tree is the exception, and so is the
+   job-notebook convention it drops with it (§3.3's second departure). If it is rejected, the fallback is
+   an importable agent package, which contradicts `architecture.md` §0. Worth an ADR either way.
 9. The removal of the test suite (`architecture.md` §0) leaves three invariants with no cheap guard: the
     hybrid query mode actually reaching the index (`query_type` validated locally), the MMR
     scale-by-best normalization, and the direction of any "nothing found" check (`!=` versus `==`). Each was a
@@ -1861,9 +2006,26 @@ Each step ends with something runnable and a gate. Do not start the next until i
     consulted document `response_format` for the GPT-OSS models and function calling for all four, but
     not `response_format` for Llama 3.3 70B or Llama 3.1 8B. The probe of §4.2 decides whether a node
     uses `response_format` or forced function calling.
-12. **The job of §19 rests on things not yet proven** (§3.3, §19.5): that `notebooks/` is importable from a stage
-    notebook (a path line per stage, or a shared one); that `run_if: AT_LEAST_ONE_FAILED` runs `rollback_agent` when
-    `deploy_agent` fails or times out; that Unity Catalog model aliases behave as §17 assumes; and the durations —
-    a stage takes the sum of its checks, so every timeout of §19.3 is a first guess to adjust after the first run.
+12. **The job of §19 rests on things not yet proven** (§3.3, §19.5): that `notebooks/` is importable from a
+    notebook run as a job task (a path line per notebook, or a shared one); that `if __name__ == "__main__"`
+    is true when Databricks runs a notebook-source `.py` file as a `notebook_task` and false when another
+    notebook imports it — the whole "one task per tree notebook" design rests on that single property, so
+    it is the first thing to verify, before A1; that `run_if: AT_LEAST_ONE_FAILED` runs the `rollback` task
+    when `deploy` fails or times out; that `dbutils.jobs.taskValues` carries `model_version` from `package`
+    to `deploy` as §17 assumes; that Unity Catalog model aliases behave as §17 assumes; and every timeout of
+    §19.3, now per notebook rather than per stage, is a first guess to adjust after the first run.
 13. **Tools as UC functions behind the managed MCP server is deferred** (§5.4): the spike (two tools, latency,
     table-function support, Free Edition) has not been run.
+14. **Secret-backed environment variables are unverified on both sides** (§3.1, §17, §19.6). Databricks
+    documents the `{{secrets/scope/key}}` reference for cluster environment variables and for Model Serving
+    endpoints; what is *not* confirmed here is the exact field that injects them into a **serverless job
+    task environment** (the `environments[].spec` block of §19.6 — the field may be named differently, or
+    may need to sit on the task rather than the environment), nor that Free Edition permits it. If it turns
+    out serverless job tasks cannot take secret-backed env vars, the fallback is narrow and does not change
+    `setup/config.py`: each notebook's `__main__` block reads the scope with `dbutils.secrets.get` and calls
+    `os.environ.setdefault(NAME, value)` before importing anything that reads config — the served copy keeps
+    using the endpoint's own `environment_vars`, which is the path that genuinely has no alternative.
+15. **Nothing yet guards the "no literal default" rule** (§3.1). A single `os.getenv(NAME, "something")`
+    slipped back into `setup/config.py` would reintroduce a value that silently diverges from the scope, and
+    with no test suite the only cheap guard is a line in `check_notebook_layering.py`: `setup/config.py` may
+    call `os.getenv` with exactly one argument. Worth adding when that script is written.
