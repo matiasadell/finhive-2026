@@ -10,7 +10,7 @@ try:
     status = w.workspace.get_status(SHARED_REPO_PATH)
     print(status)
     repo_id = status.object_id
-except Exception as e:
+except ResourceDoesNotExist:
     print(f"no Git folder found at {SHARED_REPO_PATH!r}, creating it...")
     repo = w.repos.create(
         url=GIT_URL,
