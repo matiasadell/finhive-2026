@@ -1,5 +1,5 @@
 [
-    {"series": "^GSPC", "start_date": null},
+    {"series": "SPY", "start_date": null},
     {"series": "^DJI", "start_date": null},
     {"series": "^IXIC", "start_date": null},
     {"series": "AAPL", "start_date": null},
