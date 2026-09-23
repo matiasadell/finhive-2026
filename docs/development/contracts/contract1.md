@@ -112,9 +112,10 @@ produces a confidently wrong sentence in front of a reader.
 
 ## 0. What is being asked, in one table
 
-Six tables in a new schema `finhive-2026.gold`, plus one Vector Search index. All names are
-**proposals** — see §9 if you want to change them; the agent reads every table name from the
-`finhive` secret scope, so renaming costs me one secret update, not a code change.
+Seven tables in a new schema `finhive-2026.gold`, plus one Vector Search index over the last of
+them. All names are **proposals** — see §9 if you want to change them; the agent reads them from
+`notebooks/setup/config.ipynb`, where they are literals in one cell, so a rename is a one-line edit on
+my side and it shows up in a diff.
 
 | # | Deliverable | Grain | Feeds | Slice |
 |---|---|---|---|---|
@@ -201,8 +202,10 @@ throughout this document for readability; quote it in code.
 | `trade_date`, `observation_date`, `as_of_date` | `DATE` | the **data** date. No timezone, no time component. A trading day, or the date FRED attributes an observation to |
 | `published_at`, `ingested_at`, `computed_at` | `TIMESTAMP` | **UTC**, always. Wall-clock events |
 
-`computed_at` is required on every table: it is how I detect staleness (§6) and how every tool
-states its "as of" date, which is a contract with the model, not a nicety (§2.5).
+**Every table carries a pipeline timestamp**, because it is how I detect staleness (§6) and how every
+tool states its "as of" date — a contract with the model, not a nicety (§2.5). Which one depends on
+what the row is: `computed_at` where the row is *derived* (everything in §3), `ingested_at` where the
+row is *fetched* and there is nothing to compute (`news`, §5.1). A table may carry both.
 
 ### 2.3 Missing values are NULL, never zero, never forward-filled
 
@@ -554,12 +557,12 @@ need an agreed SLA, not a guess.
 
 **Proposed**, matching the existing weekday-after-market-close job trigger:
 
-| Table | Expected `max(computed_at)` | Expected data date |
+| Table | Expected pipeline timestamp (§2.2) | Expected data date |
 |---|---|---|
 | `technical_indicators`, `risk_metrics`, `correlations` | within 24h on a trading day | `max(trade_date)` = last completed trading day |
 | `macro_series` | within 24h | varies by series frequency — no assertion on the data date |
 | `instruments`, `macro_series_catalog` | within 7 days | — |
-| `news` | within 24h | `max(published_at)` within the retention window |
+| `news` | within 24h on `max(ingested_at)` — `news` has no `computed_at` (§2.2) | `max(published_at)` within the retention window |
 
 A weekend and a market holiday must not read as a failure, so my check compares against the last
 trading day, not against "yesterday".
@@ -742,7 +745,7 @@ against cost and quota, not against correctness.
 | News symbol subset | equities + major ETFs only | Not indices, not FX |
 | News provider | your call | Quota is the constraint (§5.4) |
 | Freshness SLA | §6's table | |
-| Table names | `finhive-2026.gold.*` as above | Rename freely; I read names from secrets |
+| Table names | `finhive-2026.gold.*` as above | Rename freely; they are literals in one cell of `setup/config.ipynb` |
 | Secret key naming | `snake_case`, matching the existing `fred_api_key` | I will add one key per table name to the `finhive` scope |
 
 ---
