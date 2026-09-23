@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  upate-notebook-paths:
+  update-notebook-paths:
     runs-on: ubuntu-latest
     environment: free
     env:
@@ -30,7 +30,7 @@ jobs:
 
         
   deploy-jobs:
-    needs: upate-notebook-paths
+    needs: update-notebook-paths
     runs-on: ubuntu-latest
     environment: free
     env:
