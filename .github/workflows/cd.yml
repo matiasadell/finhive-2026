@@ -45,8 +45,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('.github/scripts/requirements.txt') }}
+          cache: pip
+          cache-dependency-path: .github/scripts/requirements.txt
       - run: pip install -r .github/scripts/requirements.txt
       - name: Sync the shared Repos checkout to main
         run: python .github/scripts/sync_shared_repo.py
