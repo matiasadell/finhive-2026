@@ -211,6 +211,10 @@ notebooks/
 ├── data_ingestion/                the data engineer's (architecture.md §3)
 │
 └── agents/                        the whole agent stack, where architecture.md §3 reserves it
+    ├── install.ipynb              %pip install -r requirements.txt, then restartPython. Run first,
+    │                              once per session; its own notebook because the restart would
+    │                              reset any caller that %run it
+    ├── requirements.txt           the exact pins, and the list to copy into a job environment
     ├── config.ipynb               catalog/schema, table names, the two base paths and the four
     │                              model names (§4.1), the role table, the secret scope. VS
     │                              endpoint/index and the MLflow names arrive with their consumer
@@ -616,7 +620,11 @@ tools/safe_tool.ipynb        the exception-to-instruction wrapper
   type crosses into the model's context, never the message** — an HTTP client puts the request URL
   in its exception text and a URL can carry a key in its query string, which `architecture.md` §5.2
   forbids forwarding and §21 records as a real incident. The type is all the model can act on
-  anyway: a `TimeoutError` is worth retrying, a `KeyError` is not.
+  anyway: a `TimeoutError` is worth retrying, a `KeyError` is not. **The rule is tree-wide, not
+  `safe_tool`'s alone**: `llm/gateway`'s `check` reports failures through its own `_detail(exc)`
+  for the same reason, since that client is built with the workspace token as its `api_key`. The
+  SDK's types are the diagnosis there — `NotFoundError` is a wrong endpoint name,
+  `AuthenticationError` a credential, `RateLimitError` a quota.
 - `resolve_symbol(frame, symbol)`: uppercase → alias table (`BITCOIN/BTC→BTC-USD`,
   `EUR/USD→EURUSD=X`, `APPLE→AAPL`, `NASDAQ→^IXIC`, …) → `{s}-USD` → `{s}=X` → a **unique**
   name-prefix match; otherwise raise `UnknownSymbolError` telling the model to call
@@ -1877,9 +1885,8 @@ Each step ends with something runnable and a gate. Do not start the next until i
 13. **Tools as UC functions behind the managed MCP server is deferred** (§5.4): the spike (two tools, latency,
     table-function support, Free Edition) has not been run.
 14. **The agent's dependencies are pinned in `notebooks/agents/requirements.txt`**
-    (`langchain-openai==1.6.2`, `langchain-core==1.6.3`, `openai==3.13.0`), and installing them is a
-    manual step: `%pip install -r ../requirements.txt` then `dbutils.library.restartPython()`, once
-    per session. No notebook installs anything itself, because `restartPython` wipes the namespace
+    (`langchain-openai==1.6.2`, `langchain-core==1.6.3`, `openai==3.13.0`) and installed by running
+    `notebooks/agents/install.ipynb` once per session. No notebook installs anything itself, because `restartPython` wipes the namespace
     and would reset every caller that `%run`s `llm/gateway`. `pydantic` is deliberately unpinned —
     `langchain-core` already requires v2, which is what the schemas need, and a second pin on it is
     how a resolution conflict starts. What is still open is how the pins reach a *job* environment,
