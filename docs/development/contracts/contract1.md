@@ -618,21 +618,34 @@ pdf.columns = [
 # -> date, open, high, low, close, adj_close, volume
 ```
 
-### 7.2 The incremental boundary duplicates one row on every run — *blocks Slice A*
+### 7.2 Gold still needs to deduplicate, for narrower reasons than it looks
 
-The orchestrator now derives `start_date` from `max(lastObservationDate)` in `ingestionLog`, and
-passes it to `yf.download(series, start=start_date)`. **yfinance's `start` is inclusive**, and the
-worker does `sdf.write.mode("append")` — so the last already-ingested trading day is re-downloaded and
-re-appended **every single run**, not only after a re-run or a repair. One duplicate row per series per
-run, accumulating.
+**Correction to an earlier draft of this document, which claimed the incremental boundary duplicates
+a row on every run. It does not.** The orchestrator derives `start_date` from
+`max(lastObservationDate) + timedelta(days=1)`, so the day already stored is never re-requested even
+though `yfinance`'s `start` is inclusive. The incremental is correct; the earlier claim was a
+misreading and is withdrawn.
 
-Gold must therefore deduplicate on the natural key before computing anything: `row_number()` over
-`(date)` partitioned per symbol, keeping the newest `ingested_at`. An indicator computed over
-duplicated days is wrong in a way nothing downstream can detect — a 20-day moving average silently
-becomes a weighted one.
+Two real paths to a duplicate remain, both narrow, and gold has to survive them because the workers
+do `sdf.write.mode("append")` with no key:
 
-The cheaper fix upstream, if you want it, is passing the day *after* the last observation as
-`start_date`; then append stays correct and gold needs no dedup for this reason.
+1. **The log is written once, at the end, for every series at once.** If the orchestrator dies after
+   the workers have written their rows but before `ingestionLog` commits, the next run still sees the
+   old boundary and re-appends everything those workers already wrote.
+2. **A worker run by hand** — during development, or to repair one series — takes whatever
+   `start_date` the widget holds, including empty, which fetches full history and appends it over
+   what is already there.
+
+So: gold deduplicates on the natural key before computing anything — `row_number()` over `(date)`
+partitioned per symbol, keeping the newest `ingested_at`. An indicator computed over duplicated days
+is wrong in a way nothing downstream can detect: a 20-day moving average silently becomes a weighted
+one. This is cheap insurance, not a workaround for a bug.
+
+**A smaller thing, while you are in there.** The job fires at 16:30 ET, thirty minutes after the US
+close, and the boundary then moves past the day it just wrote. A bar that was still preliminary when
+it was fetched is therefore never revisited — the partial-session-stored-as-a-daily-bar class that
+`architecture.md` §9 names explicitly. If it ever shows up, the fix is to re-fetch the last few days
+and MERGE rather than append.
 
 ### 7.3 Table names need quoting, and now so does the catalog
 
