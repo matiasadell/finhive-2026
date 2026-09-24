@@ -609,8 +609,13 @@ tools/safe_tool.ipynb        the exception-to-instruction wrapper
 - `resolve_symbol(frame, symbol)`: uppercase → alias table (`BITCOIN/BTC→BTC-USD`,
   `EUR/USD→EURUSD=X`, `APPLE→AAPL`, `S&P 500→SPY`, …) → `{s}-USD` → `{s}=X` → a **unique**
   name-prefix match; otherwise raise `UnknownSymbolError` telling the model to call
-  `list_instruments`. **Never near-match.** Silently answering about the wrong instrument is
-  worse than failing.
+  `list_instruments`. **Never near-match** — no edit distance, no closest guess. Silently answering
+  about the wrong instrument is worse than failing. Two consequences of that order look like
+  near-matching and are not: a fragment resolves when it prefixes exactly one name, so `APPL` and
+  `Apple Inc` both reach `AAPL` and no minimum fragment length is invented; and an alias is an
+  explicit decision, so it wins even where the names alone would be ambiguous. Every candidate is
+  checked against the frame, so a resolved symbol always has data — an alias pointing at an
+  instrument nobody ingested raises like any other miss.
 - One tool should answer the whole question: every domain ships a `compare_*` tool so a
   four-instrument question costs one call, not four.
 
@@ -1499,15 +1504,15 @@ the environment (§3.3). **Nothing calls its own `check`**: a `%run` has to stay
 invokes it in a cell. The `check` column below says what each one does where it exists, and what
 exercises the notebook where it does not. All at zero model calls unless stated.
 
-Built so far: `agents/config`, `llm/parsing`, `llm/gateway`.
+Built so far: `agents/config`, `llm/parsing`, `llm/gateway`, `tools/symbols`, `tools/safe_tool`.
 
 | Notebook | Definitions | `check` |
 |---|---|---|
 | `agents/config.ipynb` | every name, path and role setting others read (§3.1) | *no check: variables only* |
 | `llm/gateway.ipynb` | `get_chat_model`, `get_embedding_model`: `ROLE_MODELS`, token cache, `extra_body`, 300-token floor | **the one live check**: five chat roles answer, embeddings return a vector, and structured output is probed through the router *and against each routed model directly* (§4.2) — 9 calls |
 | `llm/parsing.ipynb` | `message_text`, `ask_structured`, `check_schema_supported` (§4.2) | *no check: pure; gateway's check exercises all three* |
-| `tools/symbols.ipynb` | `resolve_symbol`, the alias table, `UnknownSymbolError` | *no check: pure resolution over a literal alias table* |
-| `tools/safe_tool.ipynb` | the wrapper that turns an exception into an instruction | *no check: exercised by every tools notebook* |
+| `tools/symbols.ipynb` | `resolve_symbol`, `ALIASES`, `UnknownSymbolError` | *no check: pure resolution over a literal alias table* |
+| `tools/safe_tool.ipynb` | `safe_tool`, `TOOL_ERROR` — the wrapper that turns an exception into an instruction | *no check: exercised by every tools notebook* |
 | `tools/panel_data.ipynb` | `PanelData`, `describe(data)` | every gold table exists and is fresh; the frames load |
 | `tools/{technical,risk,fundamental,macro}_tools.ipynb` | the bodies and their `@tool` wrapping | *no check: pure over `PanelData`; `panel_data`'s check covers the data* |
 | `tools/news_tools.ipynb` | `search_news`: hybrid query and MMR (§13) | a filtered query returns only that ticker; an unanswerable one returns nothing |
@@ -1774,7 +1779,7 @@ Each step ends with something runnable and a gate. Do not start the next until i
 | Step | Build | Gate |
 |---|---|---|
 | **A1** ✅ built | `agents/config.ipynb`, `llm/parsing.ipynb`, `llm/gateway.ipynb` | `check()` green: every role callable, embeddings return a vector, and the probe schema validates on **each routed model directly** and on both guardrail endpoints (§4.2) |
-| **A2** | `tools/` (symbols, safe_tool, panel_data, the five domain files) — needs slice A of `contract1.md` | all 20 tools return; every output carries an as-of date; an unknown symbol raises instead of near-matching |
+| **A2** | `tools/`: symbols and safe_tool are built; panel_data and the five domain files need slice A of `contract1.md` | all 20 tools return; every output carries an as-of date; an unknown symbol raises instead of near-matching |
 | **A3** | `guardrails/` + `evaluation/build_golden_set.ipynb` (guardrail cases) | the guardrail cases pass in MLflow, 100%; disclaimer appended in code |
 | **A4** | `experts/`, `graph/` (all of it), the panel cases of the golden set | in MLflow: the right experts convened, no degraded card, every answer grounded, none needs all 3 drafts |
 | **A5** | `tools/news_tools.ipynb` (search + MMR), the news cases of the golden set (needs the `gold_news` index built in `data_modeling`) | the ticker filter returns only that ticker; unanswerable news cases return nothing |
