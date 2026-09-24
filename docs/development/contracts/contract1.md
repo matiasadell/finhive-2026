@@ -464,6 +464,13 @@ Fed's actual target, `inflation`).
 The current six symbols are enough for Slice A (`SPY ^DJI ^IXIC AAPL MSFT GOOG`). `SPY` is already
 there and is the beta benchmark, so nothing is blocking. Universe expansion is an open parameter — §9.
 
+**One addition worth making early: `^GSPC`, the S&P 500 index itself.** The universe has the `SPY`
+ETF but not the index, and the two are different instruments — different price scale, plus dividends,
+tracking error and an expense ratio on the ETF. The agent will not silently substitute one for the
+other, so *"how is the S&P 500 doing"* has no instrument to resolve to today and fails on purpose.
+`^GSPC` costs one line in `yahoo.json` and makes that question answerable, and `SPY` stays as the
+benchmark.
+
 ---
 
 ## 5. The news index (Slice D)

@@ -602,12 +602,16 @@ tools/safe_tool.ipynb        the exception-to-instruction wrapper
 - **Tools return labelled prose tables, not JSON.** The consumer is a language model; text
   with units survives truncation better than nested JSON.
 - `safe_tool` catches everything and returns
-  `"ERROR in {name}: {exc}. This data is not available right now. Try a different tool or
+  `"ERROR in {name} ({exc_type}). This data is not available right now. Try a different tool or
   different arguments. If there is no alternative, tell the user this specific figure could
   not be retrieved — do not estimate it."` The *instruction* matters more than the message:
-  an error that does not say what to do next produces an invented number.
+  an error that does not say what to do next produces an invented number. **Only the exception
+  type crosses into the model's context, never the message** — an HTTP client puts the request URL
+  in its exception text and a URL can carry a key in its query string, which `architecture.md` §5.2
+  forbids forwarding and §21 records as a real incident. The type is all the model can act on
+  anyway: a `TimeoutError` is worth retrying, a `KeyError` is not.
 - `resolve_symbol(frame, symbol)`: uppercase → alias table (`BITCOIN/BTC→BTC-USD`,
-  `EUR/USD→EURUSD=X`, `APPLE→AAPL`, `S&P 500→SPY`, …) → `{s}-USD` → `{s}=X` → a **unique**
+  `EUR/USD→EURUSD=X`, `APPLE→AAPL`, `NASDAQ→^IXIC`, …) → `{s}-USD` → `{s}=X` → a **unique**
   name-prefix match; otherwise raise `UnknownSymbolError` telling the model to call
   `list_instruments`. **Never near-match** — no edit distance, no closest guess. Silently answering
   about the wrong instrument is worse than failing. Two consequences of that order look like
@@ -615,7 +619,11 @@ tools/safe_tool.ipynb        the exception-to-instruction wrapper
   `Apple Inc` both reach `AAPL` and no minimum fragment length is invented; and an alias is an
   explicit decision, so it wins even where the names alone would be ambiguous. Every candidate is
   checked against the frame, so a resolved symbol always has data — an alias pointing at an
-  instrument nobody ingested raises like any other miss.
+  instrument nobody ingested raises like any other miss. **An alias names the same instrument,
+  never a proxy for it**: `SPX→SPY` is forbidden because `SPX` is the index and `SPY` is an ETF
+  tracking it, and so is `S&P 500→SPY`, which is the same substitution under a friendlier name. A
+  reader asking about an index the universe lacks gets a miss, sees the ETF described as an ETF in
+  `list_instruments`, and substitutes knowingly — the resolver does not decide that quietly.
 - One tool should answer the whole question: every domain ships a `compare_*` tool so a
   four-instrument question costs one call, not four.
 
@@ -1859,11 +1867,14 @@ Each step ends with something runnable and a gate. Do not start the next until i
     `deploy`, that Unity Catalog model aliases behave as §17 assumes, and every timeout in §19.3.
 13. **Tools as UC functions behind the managed MCP server is deferred** (§5.4): the spike (two tools, latency,
     table-function support, Free Edition) has not been run.
-14. **`langchain-openai` has to be in the notebook environment** and is not installed by any notebook:
-    `%pip install` restarts the Python process, which would break every caller that `%run`s
-    `llm/gateway`. The pins (`langchain-openai==1.6.2`, `langchain-core==1.6.3`, `openai==3.13.0`)
-    are the versions to use; how they get there — a serverless environment spec, a cluster library — is
-    part of the deploy question in item 8.
+14. **The agent's dependencies are pinned in `notebooks/agents/requirements.txt`**
+    (`langchain-openai==1.6.2`, `langchain-core==1.6.3`, `openai==3.13.0`), and installing them is a
+    manual step: `%pip install -r ../requirements.txt` then `dbutils.library.restartPython()`, once
+    per session. No notebook installs anything itself, because `restartPython` wipes the namespace
+    and would reset every caller that `%run`s `llm/gateway`. `pydantic` is deliberately unpinned —
+    `langchain-core` already requires v2, which is what the schemas need, and a second pin on it is
+    how a resolution conflict starts. What is still open is how the pins reach a *job* environment,
+    which is part of item 8.
 15. **The one catalog is `finhive-2026`, and the ingestion does not write there yet.** Both workers
     create a `finhive` catalog without the year (`contract1.md` §7.4), so the gold tables this design
     reads would sit in a different catalog from their own sources until that is repointed. The agent
