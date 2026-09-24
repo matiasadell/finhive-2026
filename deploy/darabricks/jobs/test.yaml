@@ -1,6 +1,7 @@
 resources:
   jobs:
     test:
+      name: test
       trigger:
         pause_status: UNPAUSED
         periodic:
