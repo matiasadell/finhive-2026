@@ -211,10 +211,6 @@ notebooks/
 ├── data_ingestion/                the data engineer's (architecture.md §3)
 │
 └── agents/                        the whole agent stack, where architecture.md §3 reserves it
-    ├── install.ipynb              %pip install -r requirements.txt, then restartPython. Run first,
-    │                              once per session; its own notebook because the restart would
-    │                              reset any caller that %run it
-    ├── requirements.txt           the exact pins, and the list to copy into a job environment
     ├── config.ipynb               catalog/schema, table names, the two base paths and the four
     │                              model names (§4.1), the role table, the secret scope. VS
     │                              endpoint/index and the MLflow names arrive with their consumer
@@ -1884,13 +1880,16 @@ Each step ends with something runnable and a gate. Do not start the next until i
     `deploy`, that Unity Catalog model aliases behave as §17 assumes, and every timeout in §19.3.
 13. **Tools as UC functions behind the managed MCP server is deferred** (§5.4): the spike (two tools, latency,
     table-function support, Free Edition) has not been run.
-14. **The agent's dependencies are pinned in `notebooks/agents/requirements.txt`**
-    (`langchain-openai==1.6.2`, `langchain-core==1.6.3`, `openai==3.13.0`) and installed by running
-    `notebooks/agents/install.ipynb` once per session. No notebook installs anything itself, because `restartPython` wipes the namespace
-    and would reset every caller that `%run`s `llm/gateway`. `pydantic` is deliberately unpinned —
-    `langchain-core` already requires v2, which is what the schemas need, and a second pin on it is
-    how a resolution conflict starts. What is still open is how the pins reach a *job* environment,
-    which is part of item 8.
+14. **Third-party dependencies are a `%pip install` cell in the notebook that imports them**, which
+    today is only `llm/gateway`: `langchain-openai==1.6.2`, `langchain-core==1.6.3`,
+    `openai==3.13.0`, pinned exactly because an unpinned `>=` produced a `ResolutionTooDeep` failure
+    before any code ran (§21). `pydantic` is not in the list — the runtime ships v2, which is what
+    `llm/parsing`'s schemas need, and a second pin on it is how a resolution conflict starts. The
+    same list is what a job's `environment` spec declares, the way
+    `deploy/darabricks/jobs/ingest_yahoo.yaml` declares `yfinance`; keeping the two equal is manual
+    until there is a job (item 8). **What this costs:** a `%run` of `llm/gateway` runs that cell too,
+    so the caller pays an already-satisfied pip resolve, and whether `%pip` behaves predictably under
+    `%run` is the kind of thing only a real run settles — watch for it on the first one.
 15. **The one catalog is `finhive-2026`, and the ingestion does not write there yet.** Both workers
     create a `finhive` catalog without the year (`contract1.md` §7.4), so the gold tables this design
     reads would sit in a different catalog from their own sources until that is repointed. The agent
