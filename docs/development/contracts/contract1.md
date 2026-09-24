@@ -189,10 +189,13 @@ throughout this document for readability; quote it in code.
 - Column `symbol`, **canonical Yahoo-style ticker**, uppercase, exactly as the upstream source names
   it: `AAPL`, `MSFT`, `SPY`, and later `BTC-USD`, `EURUSD=X`, `^GSPC`.
 - This matters because the agent resolves what a user typed into a symbol by trying, in order: the
-  literal uppercase, an alias table (`BITCOIN`→`BTC-USD`, `S&P 500`→`SPY`), then `{X}-USD`, then
+  literal uppercase, an alias table (`BITCOIN`→`BTC-USD`, `APPLE`→`AAPL`, `NASDAQ`→`^IXIC`), then
+  `{X}-USD`, then
   `{X}=X`, then a **unique name-prefix match** against `instruments.name`. It **never near-matches** —
   answering about the wrong instrument is worse than failing — so a symbol that does not appear
-  verbatim in `instruments` is simply unreachable.
+  verbatim in `instruments` is simply unreachable. **An alias names the same instrument, never a
+  proxy**: there is deliberately no `S&P 500`→`SPY`, because the index and an ETF tracking it are
+  different instruments (§4.2 asks for `^GSPC` for exactly this reason).
 - One canonical spelling per instrument. No `BRK.B` in one table and `BRK-B` in another.
 
 ### 2.2 Dates and timestamps

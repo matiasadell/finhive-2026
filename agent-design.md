@@ -420,8 +420,9 @@ MODEL_EMBEDDINGS = f"{CATALOG}.default.finhive_embeddings"
 MODEL_GUARD_IN   = "databricks-meta-llama-3-1-8b-instruct"
 MODEL_GUARD_OUT  = "databricks-gpt-oss-20b"
 
-# what finhive_router routes to, 70/30 - a schema has to validate on BOTH (§4.2)
-MODELS_ROUTED = ("databricks-meta-llama-3-3-70b-instruct", "databricks-gpt-oss-20b")
+# the Model Serving ENDPOINT names of the two routed models - not the system.ai.* model names the
+# router is configured with, so this ships empty rather than guessed (§22 item 10)
+MODELS_ROUTED = ()
 ```
 
 Both paths are OpenAI-compatible, so one `ChatOpenAI` construction serves both and only `base_url` and
@@ -519,7 +520,10 @@ becomes `anyOf`, a nested model becomes `$ref`, `dict[str, str]` becomes `additi
 rules for every schema are:
 
 - **Flat.** No nested models, no `dict`, no `Optional` or `Union`. Use `Literal`, `bool`, `str`,
-  `float`, `list[str]`.
+  `float`, `list[str]`. `additionalProperties` is the one key that has to be judged by its *value*
+  rather than its name: `false` is what strict mode wants and pydantic emits it for
+  `extra="forbid"`, while a `dict` field emits a schema there instead. `check_schema_supported`
+  distinguishes the two.
 - **Every field required**, with the *absence* encoded as a value (an empty string, an empty list),
   because strict mode requires all keys.
 - **Field descriptions carry the meaning**, because the model reads them as part of the schema.
@@ -569,8 +573,11 @@ structured round trip through it exercises one of the two models with 70/30 odds
 `response_format` and GPT-OSS honours it, that probe passes seven times in ten while the graph fails
 intermittently in production — a green check and a broken system. So `llm/gateway`'s `check` (§18)
 probes structured output **three** times: through the router service, and against each model in
-`MODELS_ROUTED` **directly**, on `SERVING_PATH`. Only the direct pair is conclusive. If a model does not
-honour `response_format`, that node switches to **function calling** — a single tool whose arguments are
+`MODELS_ROUTED` **directly**, on `SERVING_PATH`. Only the direct pair is conclusive — and it needs the
+two *endpoint* names, which are not the `system.ai.*` *model* names the router is configured with, so
+`MODELS_ROUTED` ships empty and those two probes stay off until someone reads the names off the
+workspace. Until then a green `structured/router` row proves one of the two, not both. If a model does
+not honour `response_format`, that node switches to **function calling** — a single tool whose arguments are
 the same schema, with the call forced — which both models document; nothing about the schemas or the
 callers changes.
 
@@ -1849,10 +1856,12 @@ Each step ends with something runnable and a gate. Do not start the next until i
 10. **The guardrail endpoints are unverified** (§11.3): that `databricks-meta-llama-3-1-8b-instruct`
     and `databricks-gpt-oss-20b` exist on this Free Edition workspace and answer on `SERVING_PATH`, and
     that the small model holds the research/advice line on the golden set. `llm/gateway`'s `check`
-    answers the first two; a 404 there is a name problem, not a capability one. `MODELS_ROUTED`'s
-    llama endpoint name (`databricks-meta-llama-3-3-70b-instruct`) is likewise a guess — the router is
-    configured with the Unity Catalog model name `system.ai.llama_v3_3_70b_instruct`, which is not the
-    endpoint name.
+    answers the first two; a 404 there is a name problem, not a capability one. `MODELS_ROUTED` is
+    **empty on purpose**: probing needs Model Serving *endpoint* names and the router is configured
+    with Unity Catalog *model* names (`system.ai.llama_v3_3_70b_instruct`, `system.ai.gpt-oss-20b`),
+    which are different strings. Read the two endpoint names off the workspace's Serving page and the
+    70/30 probe turns itself on; shipping a guess there would have gated a health check on a name
+    nobody confirmed.
 11. **Structured outputs are unverified on the routed pair and on the guardrail endpoints** (§4.2): the
     docs consulted document `response_format` for the GPT-OSS models and function calling for all four,
     but not `response_format` for Llama 3.3 70B or Llama 3.1 8B. `llm/gateway`'s `check` now probes each
