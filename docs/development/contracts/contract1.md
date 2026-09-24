@@ -596,37 +596,34 @@ the Model Serving endpoint runs as.
 ## 7. Things in the current ingestion that would block this
 
 Reported, not touched — these are in your half of the repo and I have deliberately changed nothing.
-Two of them genuinely block Slice A, so they are worth a look before you start on gold.
+None of them blocks Slice A any more: §7.1 was fixed upstream while this document was being written,
+and what is left is either mine to absorb in gold or a one-line decision.
 
-### 7.1 Yahoo worker: the ticker leaks into the column names — *blocks Slice A*
+### 7.1 Yahoo worker: the ticker no longer leaks — *resolved*
 
-`notebooks/data_ingestion/yahoo/worker.ipynb` flattens the yfinance MultiIndex like this:
-
-```python
-pdf.columns = [
-    "_".join(str(p) for p in col if p).lower() if isinstance(col, tuple) else str(col).lower()
-    for col in pdf.columns
-]
-```
-
-For a single-ticker download, yfinance returns `(Price, Ticker)` tuples, so `finhive-2026.yahoo.AAPL` ends
-up with columns `open_aapl`, `high_aapl`, `close_aapl`, `adj close_aapl`, `volume_aapl`. Two
-consequences:
-
-- **every Yahoo table has a different schema**, so a UNION across the universe cannot be written
-  generically;
-- `adj close_aapl` **contains a space**, so it needs backticks in every SQL reference.
-
-A one-line fix inside the existing comprehension — drop the ticker level and normalise separators —
-makes every table share one schema:
+**Fixed upstream; recorded here because an earlier version of this document called it blocking.** The
+worker now drops the ticker level instead of folding it into the name:
 
 ```python
-pdf.columns = [
-    (col[0] if isinstance(col, tuple) else col).strip().lower().replace(" ", "_")
-    for col in pdf.columns
-]
-# -> date, open, high, low, close, adj_close, volume
+pdf = pdf.droplevel(level=1, axis=1)
 ```
+
+So every Yahoo table shares one schema, and a UNION across the universe can be written generically.
+That was the blocking half and it is gone.
+
+**One detail survives for whoever writes the gold transform.** The columns keep yfinance's own
+casing and spacing — `Date`, `Open`, `High`, `Low`, `Close`, `Adj Close`, `Volume` — so `Adj Close`
+needs backticks in SQL, and none of them match the lower-case names this contract asks for in §3.2.
+Normalising them is the gold transform's first step, not the worker's problem:
+
+```sql
+SELECT `Date` AS trade_date, Open AS open, `Adj Close` AS adj_close, ...
+```
+
+Worth knowing rather than fixing: `droplevel(level=1, axis=1)` assumes the frame always comes back
+with two column levels. `yf.download` does that for a single ticker today, but a future version
+returning single-level columns would raise `IndexError` here rather than degrade — which is the
+right failure, just an abrupt one.
 
 ### 7.2 Gold still needs to deduplicate, for narrower reasons than it looks
 
@@ -660,7 +657,7 @@ and MERGE rather than append.
 ### 7.3 Table names need quoting, and now so does the catalog
 
 ``finhive-2026.yahoo.`^DJI` `` needs backticks in **two** places: the catalog, for its hyphen (§2.0),
-and the table, for its caret. Any generated UNION over the universe must quote every identifier, and
+and the table, for its caret. A third, inside the table: ``​`Adj Close`​`` has a space (§7.1). Any generated UNION over the universe must quote every identifier, and
 the list of tables should come from `config/data_ingestion/yahoo.json` rather than from `SHOW TABLES`,
 so the config stays the single source of truth for the universe.
 
@@ -800,5 +797,7 @@ lifecycle and rebuild rules.
 **Neither of us, yet.** Fundamentals (contract 2), and the semantic cache (agent side, but it depends
 on infrastructure that has not been verified).
 
-I have changed nothing in your half of the repo while writing this, including the two blocking issues
-in §7 — they are yours to fix or to delegate back to me, whichever you prefer.
+I have changed nothing in your half of the repo, and §7 is a report rather than a request: the
+column-name issue in §7.1 is already fixed upstream and recorded as resolved, and what remains there
+is either mine to handle in gold (§7.2's dedup, §7.1's casing) or a one-line decision that is yours
+(§7.4's catalog).
