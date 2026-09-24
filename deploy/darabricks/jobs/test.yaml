@@ -2,6 +2,11 @@ resources:
   jobs:
     test:
       name: test
+      trigger:
+        pause_status: UNPAUSED
+        periodic:
+          interval: 1
+          unit: DAYS
       tasks:
         - task_key: nbt
           notebook_task:
