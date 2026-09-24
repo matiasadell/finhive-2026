@@ -1,25 +1,25 @@
-name: finhive_ingest_yahoo
-tasks:
-  - task_key: ingest_yahoo
-    notebook_task:
-      notebook_path: /Workspace/Users/facumazzola@gmail.com/finhive-2026/notebooks/data_ingestion/yahoo/orchestrator
-      base_parameters:
-        job_name: finhive_ingest_yahoo
-        worker_notebook_path: /Workspace/Users/facumazzola@gmail.com/finhive-2026/notebooks/data_ingestion/yahoo/worker
-    environment_key: ingestion
-environments:
-  - environment_key: ingestion
-    spec:
-      client: "3"
-      dependencies:
-        - yfinance
-schedule:
-  quartz_cron_expression: "0 30 16 ? * MON-FRI"
-  timezone_id: America/New_York
-  pause_status: UNPAUSED
-queue:
-  enabled: true
-email_notifications:
-  on_failure:
-    - "{alert_email}"
-max_retries: 1
+resources:
+  jobs:
+    finhive_ingest_yahoo:
+      name: finhive_ingest_yahoo
+      schedule:
+        quartz_cron_expression: 0 30 16 ? * MON-FRI
+        timezone_id: America/New_York
+        pause_status: UNPAUSED
+      tasks:
+        - task_key: ingest_yahoo
+          notebook_task:
+            notebook_path: /Repos/facumazzola@hotmail.com/finhive-2026/notebooks/data_ingestion/yahoo/orchestrator
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: ingestion
+      queue:
+        enabled: true
+      environments:
+        - environment_key: ingestion
+          spec:
+            client: "3"
+            dependencies:
+              - yfinance
+      performance_target: PERFORMANCE_OPTIMIZED
