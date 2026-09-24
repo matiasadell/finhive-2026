@@ -1,0 +1,12 @@
+resources:
+  jobs:
+    test:
+      name: test
+      tasks:
+        - task_key: nbt
+          notebook_task:
+            notebook_path: /Repos/facumazzola@hotmail.com/finhive-2026/notebooks/test
+            source: WORKSPACE
+      queue:
+        enabled: true
+      performance_target: PERFORMANCE_OPTIMIZED
