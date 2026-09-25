@@ -4,5 +4,6 @@
     {"series": "^IXIC"},
     {"series": "AAPL"},
     {"series": "MSFT"},
-    {"series": "GOOG"}
+    {"series": "GOOG"},
+    {"series": "^GSPC"}
 ]

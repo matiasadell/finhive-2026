@@ -1,0 +1,65 @@
+resources:
+  jobs:
+    finhive_gold_modeling:
+      name: finhive_gold_modeling
+      schedule:
+        quartz_cron_expression: 0 0 17 ? * MON-FRI
+        timezone_id: America/New_York
+        pause_status: UNPAUSED
+      tasks:
+        # --- Layer 1: parallel, no dependencies ---
+        - task_key: instruments
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/instruments
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+        - task_key: technical_indicators
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/technical_indicators
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+        - task_key: macro_series
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/macro_series
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+        - task_key: macro_series_catalog
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/macro_series_catalog
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+        # --- Layer 2: depends on Layer 1 ---
+        - task_key: risk_metrics
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/risk_metrics
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+          depends_on:
+            - task_key: technical_indicators
+            - task_key: macro_series
+        - task_key: correlations
+          notebook_task:
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_modeling/correlations
+            base_parameters:
+              job_name: "{{job.name}}"
+            source: WORKSPACE
+          environment_key: gold
+          depends_on:
+            - task_key: technical_indicators
+      queue:
+        enabled: true
+      environments:
+        - environment_key: gold
+          spec:
+            client: "3"
+      performance_target: PERFORMANCE_OPTIMIZED

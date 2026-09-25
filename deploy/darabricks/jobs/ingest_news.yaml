@@ -1,15 +1,15 @@
 resources:
   jobs:
-    finhive_ingest_fred:
-      name: finhive_ingest_fred
+    finhive_ingest_news:
+      name: finhive_ingest_news
       schedule:
         quartz_cron_expression: 0 30 16 ? * MON-FRI
         timezone_id: America/New_York
         pause_status: UNPAUSED
       tasks:
-        - task_key: ingest_fred
+        - task_key: ingest_news
           notebook_task:
-            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_ingestion/fred/orchestrator
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_ingestion/news/orchestrator
             base_parameters:
               job_name: "{{job.name}}"
             source: WORKSPACE
@@ -21,5 +21,5 @@ resources:
           spec:
             client: "3"
             dependencies:
-              - fredapi
+              - requests
       performance_target: PERFORMANCE_OPTIMIZED
