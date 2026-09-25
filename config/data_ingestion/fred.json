@@ -3,5 +3,13 @@
     {"series": "CPIAUCSL"},
     {"series": "UNRATE"},
     {"series": "FEDFUNDS"},
-    {"series": "DGS10"}
+    {"series": "DGS10"},
+    {"series": "DGS3MO"},
+    {"series": "DGS2"},
+    {"series": "DGS5"},
+    {"series": "DGS30"},
+    {"series": "CPILFESL"},
+    {"series": "VIXCLS"},
+    {"series": "PAYEMS"},
+    {"series": "INDPRO"}
 ]

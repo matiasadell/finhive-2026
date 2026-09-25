@@ -9,7 +9,7 @@ resources:
       tasks:
         - task_key: ingest_yahoo
           notebook_task:
-            notebook_path: /Repos/facumazzola@hotmail.com/finhive-2026/notebooks/data_ingestion/yahoo/orchestrator
+            notebook_path: /Workspace/Users/facumazzola@hotmail.com/finhive-2026/notebooks/data_ingestion/yahoo/orchestrator
             base_parameters:
               job_name: "{{job.name}}"
             source: WORKSPACE
